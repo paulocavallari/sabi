@@ -1606,3 +1606,76 @@ unchanged in character from the pre-existing baseline.
 Nothing constructs a `ShadowMirror` from `.sabi/shadow.json` in production yet.
 The wiring point exists and is tested; the controller side is a follow-up. This
 is stated in the PR body rather than left for someone to discover.
+
+## 2026-09-25 — A free tier is not a free price (NVIDIA, Mistral, Gemini)
+
+### Context
+
+Three providers were wired as upstreams and tested against live keys on
+2026-09-25: NVIDIA NIM, Mistral, and native Gemini. The intent was to widen
+the free lane. What the testing produced was a distinction the catalogue
+model does not currently express.
+
+Mistral refuses a model outside the account's tier:
+
+```json
+{"message":"This model is not available in your subscription tier",
+ "type":"tier_not_allowed","code":"1910","raw_status_code":403}
+```
+
+`codestral-latest` and `mistral-code-latest` are inside the tier.
+`mistral-large-latest` is not. The account is on a restricted tier and the
+tier — not a price — decides what runs.
+
+NVIDIA returned `404 Not found for account` for 20 of 25 tested models and
+`410 Gone` for the rest. Three responded to real completions. No credits or
+usage endpoint is exposed, so the exhaustion boundary cannot be observed
+before it is hit.
+
+Neither provider publishes per-token pricing through a machine-readable
+feed. `determineFree` therefore returns `unknown` for every model on both,
+and Gemini, whose 33 catalogue entries are all priced non-zero, returns
+`paid` for all of them.
+
+### Decision
+
+**A free tier, a credit balance, and a zero price are three different
+facts, and only the third is provable from a catalogue.**
+
+| | OpenRouter `:free` | Mistral free tier | NVIDIA credits |
+|---|---|---|---|
+| Zero-priced | yes, unconditionally | no — tier-restricted | no — finite balance |
+| On exhaustion | stays free, throttles | model leaves the tier | 404 / 410, or a charge |
+| Provable from a catalogue | yes | no | no |
+
+A credit balance is zero until it is not. Treating that as `free: true` is
+the same category of error as treating a 200 that carries an error body as
+a successful round: a success that was never verified.
+
+The three providers are therefore recorded with `paidModelsAllowed: true`
+and at list price. That is the conservative reading and it has a real cost:
+**Sabi's free-only lane will not route to capacity the operator is not
+paying for**, which is the opposite of the product's intent.
+
+`openrouter.paidModelsAllowed: false` is unchanged and still enforced
+per-upstream. The free-only rule was never global and still is not.
+
+### Consequences
+
+- Only models verified by a real completion against the operator's own key
+  are listed. The unlisted NVIDIA catalogue entries are absent because they
+  return 404 or 410, not because they were overlooked.
+- The quota dimension is not optional. `quota_state` is the only honest
+  representation of a tier- or credit-bounded allowance, which is the
+  argument in spec 013 for keeping capability, availability, and user
+  eligibility separate.
+- A future free-lane entry for these providers needs a policy that admits
+  tier-bounded free capacity explicitly, and a demotion trigger on the
+  403/404 transition. Neither exists yet.
+
+### Open
+
+Whether to mark these `cost: 0` with the 403 as the fail-safe, or keep
+them priced. Recorded rather than decided here: the honest answer depends on
+whether NVIDIA's allowance is a depleting signup grant or a standing one,
+which the API does not expose.
