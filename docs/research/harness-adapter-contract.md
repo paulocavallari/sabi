@@ -1,5 +1,12 @@
 # Harness adapter contract v1
 
+> For the per-round routing decision itself — what a scheduler asks a host for,
+> and what each host can actually honour — see
+> [host-routing-contract.md](./host-routing-contract.md). This document covers
+> which operations make an integration *ready*; that one covers what it may
+# decide.
+
+
 Sabi does not treat an executable on `PATH` as an installed integration. A controller adapter is
 ready only after it can account for every operation below:
 

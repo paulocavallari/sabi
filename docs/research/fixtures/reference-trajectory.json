@@ -1,0 +1,89 @@
+{
+  "$comment": "Reference trajectory for the host routing contract (docs/research/host-routing-contract.md). This is a fixture demonstrating the decision shape at each round. It is NOT a benchmark: it does not claim these decisions are optimal, and nothing here should be read as evidence that they are. Whether they are good is answered by a separate evaluation.",
+  "schemaVersion": 1,
+  "task": "fix a failing auth test by tightening token validation",
+  "trajectory": [
+    {
+      "round": 1,
+      "phase": "search",
+      "observed": "trajectory starts; no file reads yet",
+      "requirements": { "tools": false, "reasoning": false, "minContextTokens": 32000 },
+      "decision": {
+        "model": "vendor/small-free",
+        "requirements": { "minContextTokens": 32000 },
+        "reason": "repository search needs no tool use and no reasoning; strongest available capacity is wasted here"
+      },
+      "outcome": "ok"
+    },
+    {
+      "round": 2,
+      "phase": "read",
+      "observed": "three files read; context at 24k",
+      "requirements": { "tools": false, "reasoning": false, "minContextTokens": 64000 },
+      "decision": {
+        "model": "vendor/small-free",
+        "requirements": { "minContextTokens": 64000 },
+        "reason": "still exploration; context requirement grew but capability requirement did not"
+      },
+      "outcome": "ok"
+    },
+    {
+      "round": 3,
+      "phase": "edit",
+      "observed": "mutation about to be authored; tools required",
+      "requirements": { "tools": true, "reasoning": true, "minContextTokens": 64000 },
+      "decision": {
+        "model": "vendor/coder",
+        "reasoningEffort": "medium",
+        "requirements": { "tools": true, "reasoning": true, "minContextTokens": 64000 },
+        "reason": "first round that benefits from tools and effort together"
+      },
+      "outcome": "ok"
+    },
+    {
+      "round": 4,
+      "phase": "test",
+      "observed": "test run failed; identical error on two consecutive runs",
+      "requirements": { "tools": true, "reasoning": true, "minContextTokens": 64000 },
+      "decision": {
+        "model": "vendor/coder",
+        "reasoningEffort": "high",
+        "requirements": { "tools": true, "reasoning": true, "minContextTokens": 64000 },
+        "reason": "two identical failures are capability evidence, not availability evidence; raise effort rather than switching provider"
+      },
+      "outcome": "ok",
+      "$note": "Contrast: a 429 here would be availability, and the correct action would be a different healthy route at the SAME capability. Conflating them routes to a stronger model for a reason that was never true."
+    },
+    {
+      "round": 5,
+      "phase": "recovery",
+      "observed": "mutation failed to apply; patch rejected twice",
+      "requirements": { "tools": true, "reasoning": true, "minContextTokens": 128000 },
+      "decision": {
+        "model": "vendor/strong",
+        "reasoningEffort": "high",
+        "requirements": { "tools": true, "reasoning": true, "minContextTokens": 128000 },
+        "reason": "repeated semantic failure at high context justifies a capability increase, not a retry"
+      },
+      "outcome": "ok"
+    },
+    {
+      "round": 6,
+      "phase": "verify",
+      "observed": "tests pass; read-only inspection",
+      "requirements": { "tools": false, "reasoning": false, "minContextTokens": 64000 },
+      "decision": {
+        "model": "vendor/small-free",
+        "requirements": { "minContextTokens": 64000 },
+        "reason": "de-escalation: the half of adaptive routing that is usually not demonstrated"
+      },
+      "outcome": "ok"
+    }
+  ],
+  "$invariants": [
+    "provider is an output, not an input; the decision omits it where the host does not expose it per-round",
+    "a model transition updates model, provider, effort, context ceiling, modality and transport health together",
+    "the model that answered is verified against the model requested before anything learns from the round",
+    "transport failure and capability failure are distinct; only the second justifies a stronger model"
+  ]
+}
