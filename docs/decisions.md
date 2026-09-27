@@ -1623,13 +1623,22 @@ analysis, filed as received) lives at
 onto the current proxy/controller/hook runtime and argues the gap to Control
 is smaller than the PRD alone suggests.
 
+**Sequencing note (2026-09-27, flagged by automated PR review):** at the
+commit this PR lands on, `specs/012`, `013` and `016` are not yet on `main` —
+they exist on a companion branch/PR (specs consolidation, #144) built off a
+different, not-yet-pushed local history. The references to `specs/016` below
+describe where that spec will live once #144 merges, not a file present in
+this repository at this PR's own commit. Do not follow that path expecting it
+to resolve until #144 lands.
+
 ### Why
 
 The PRD's one-rule product-drift test — "does this feature help Sabi decide
 what intelligence to use, or does it help the agent perform the work" —
 matches the boundary `specs/016-sabi-control-decision-interface/spec.md`
-already independently defends ("Do not build a coding agent"). Filing the PRD
-locally makes that boundary citable instead of living only in chat history.
+independently defends ("Do not build a coding agent") once that spec lands.
+Filing the PRD locally makes that boundary citable instead of living only in
+chat history.
 
 ### Tradeoffs
 

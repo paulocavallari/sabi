@@ -12,7 +12,11 @@ smaller than the PRD alone suggests.
 `specs/016-sabi-control-decision-interface/` (the `SabiState` /
 `SabiDecision` / `decide()` interface), which was written independently and is
 the authoritative spec for that surface. Where the two disagree, the spec
-wins — this file is context, not a second source of truth.
+wins — this file is context, not a second source of truth. **Sequencing note
+(2026-09-27, flagged by automated PR review):** spec 016 lands via a
+companion PR (#144) built off a different local history; at this PR's own
+commit it is not yet present on `main`. The reference above describes where
+it will live once that PR merges.
 
 ---
 

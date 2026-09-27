@@ -1552,7 +1552,13 @@ No single classifier should be hard-coded as the permanent architecture.
 
 The long-term advantage of Control comes from outcome data.
 
-Example observation:
+> **Editorial note added 2026-09-27** (flagged by automated PR review): the
+> percentages below are illustrative — they show the *shape* of the pattern
+> Sabi's learning loop should be able to detect, not measured results from any
+> dataset, run, or commit. No such data exists yet. Do not cite these numbers
+> as evidence anywhere else in this repo.
+
+Example observation (hypothetical, not measured):
 
 ```text
 task_class = debugging
@@ -1566,7 +1572,7 @@ success = 89%
 
 Sabi can learn that escalation should happen earlier.
 
-Another:
+Another (also hypothetical):
 
 ```text
 task_class = search

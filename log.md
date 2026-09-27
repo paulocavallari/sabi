@@ -1824,6 +1824,8 @@ Live → Control product vision) and
 the current proxy/controller/hook runtime — coding harness, session hook,
 controller daemon at :7433, Sabi proxy at :8787, Jev, providers, local state
 — and argues the gap to Control is smaller than the PRD alone suggests, since
-`specs/016-sabi-control-decision-interface/` already covers most of the
-`decide()` surface it proposes). Decision logged in `docs/decisions.md`
-(2026-09-27). No code changed; docs only.
+`specs/016-sabi-control-decision-interface/` covers most of the `decide()`
+surface it proposes). That spec lands via a companion PR (#144), not this one
+— at this commit `specs/012/013/016` are not yet on `main` (flagged by
+automated PR review, corrected 2026-09-27). Decision logged in
+`docs/decisions.md` (2026-09-27). No code changed; docs only.
