@@ -1845,3 +1845,18 @@ escalation seam, a new spec for user policy (PRD §27) and provider discovery
 (PRD §28, which 016 itself admits is unwritten), moving 011
 (huggingface-presence) out of `specs/` into `docs/`, and retiring or
 regenerating the now-stale `docs/roadmap-12-month.md`.
+
+## [2026-09-27] fix | Corrected the specs/ consolidation review: tasks.md was never unreliable
+
+Automated PR review (Codex, on #144) caught a real error in the review above:
+the claim that every `tasks.md` across all 16 specs showed 0 checked boxes
+was false, verified by direct recount rather than trusted — 001 is 49/49,
+002 is 3/16, 005 is 7/10, 010 is 10/10. That false premise had led the same
+pass to "correct" 002's true claim that 001 had all 49 tasks implemented into
+a false one; reverted. 002's Status is corrected to `Partial`, not `Built`:
+confirmed `createAdapterEmitter` (`packages/core/src/adapter-emitter.ts`)
+exists only in its own definition and unit test, no adapter production path
+calls it, so User Story 4 (every adapter emits the normalized receipt) is
+genuinely unshipped. Also flagged and left open: 016's closed decision union
+has no slot for the `unchanged` outcome its own fail-open requirement (R4)
+needs — that's 016's requirements text to fix, not this review's.

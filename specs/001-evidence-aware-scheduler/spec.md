@@ -7,9 +7,9 @@
 **Status**: Built — `TrajectoryEvidence`, `VerificationState` and
 `RecoveryCapsule` are implemented in `packages/core/src/types.ts`,
 `packages/core/src/evidence.ts`, and `packages/controller/src/registry.ts` /
-`types.ts`. `tasks.md` was never checked off against the implementation;
-treat `log.md` and this note, not `tasks.md`, as the record of what shipped.
-Verified 2026-09-27 against the working tree, not re-derived from this file.
+`types.ts`. `tasks.md` is 49/49 checked, matching. Verified 2026-09-27 against
+the working tree (correcting an earlier pass in this same review that
+mis-grepped this as 0/49 — see `docs/research/specs-consolidation-review.md`).
 
 **Input**: User-provided research synthesis from a 1,200-paper September 18,
 2026 arXiv CS screening and a request to make Sabi an evidence-aware trajectory

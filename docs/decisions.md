@@ -1719,3 +1719,41 @@ touched" state. Left as a recommendation, not applied.
 If a sixth spec ships without anyone updating its `Status` field, that's a
 process problem, not a one-off — worth deciding then whether `tasks.md`
 should be dropped in favor of `log.md` as the sole shipped-state record.
+
+---
+
+## [2026-09-27] Corrected the consolidation review itself: tasks.md was never unreliable
+
+### Decision
+
+The review above claimed every `tasks.md` across all 16 specs showed 0
+checked boxes, and on that basis "corrected" 002's true claim that 001 had
+all 49 tasks implemented into a false one. Both claims were wrong. Automated
+PR review (Codex, on #144) caught it; verified by direct recount, not
+trusted on say-so: 001 is 49/49 checked, 002 is 3/16, 005 is 7/10, 010 is
+10/10 — `tasks.md` is accurate. 002's `Status` is corrected to `Partial`
+(not `Built`) after confirming `createAdapterEmitter` exists only in its own
+definition and unit test — no adapter production path calls it, so User
+Story 4 is genuinely unshipped. 001's original true claim is restored.
+
+### Why
+
+A review whose central finding is "don't trust this file, trust the code"
+should not itself skip verifying the file it dismissed. The undercounting
+bug's exact cause wasn't isolated — worth being honest that it wasn't traced,
+only caught and fixed. The fix is to record the correction plainly, the same
+way `tasks.md` review dashboards. Also flagged by the same PR review and left
+open here: `specs/016`'s closed decision union (`route|retry|escalate|stop`)
+has no slot for the `unchanged` outcome its own R4 and acceptance criteria
+require — noted in `docs/research/specs-consolidation-review.md`, not fixed,
+since it's 016's requirements text and not this review's to silently resolve.
+
+### Tradeoffs
+
+None avoided by leaving this uncorrected — it would have stood as a false
+claim in a document whose whole purpose is catching exactly that kind of
+thing elsewhere in the repo.
+
+### Revisit later?
+
+Not applicable — this is the correction itself.

@@ -4,18 +4,25 @@
 
 **Created**: 2026-09-23
 
-**Status**: Built — `ExecutionReceipt` / `ExecutionCapabilities` are
+**Status**: Partial — `ExecutionReceipt` / `ExecutionCapabilities` are
 implemented in `packages/core/src/receipts.ts`, `capabilities.ts` and
-`router.ts`. `tasks.md` was never checked off; treat `log.md` and this note as
-the record of what shipped. Verified 2026-09-27 against the working tree.
+`router.ts` (`tasks.md` 3/16 checked, matching this). User Story 4 / FR-005 /
+SC-003 (every supported adapter emits the normalized receipt) is **not**
+shipped: `createAdapterEmitter` (`packages/core/src/adapter-emitter.ts`)
+exists only in its own definition and unit test — grep confirms no
+Command Code, OpenCode, Hermes, Oh My Pi, Prime Agent, Orca or DSH production
+path calls it. Corrected 2026-09-27 after an earlier pass in this same review
+wrongly marked this `Built` on a tasks.md count that was itself wrong (see
+below) — flagged by automated PR review, verified directly, fixed rather than
+just reverted.
 
 **Input**: Simplicio-material synthesis (deterministic local execution evidence as
 first-class routing input) mapped against `001-evidence-aware-scheduler` and
-`docs/specs/adaptive-inference-scheduler-vnext.md`. Correction (2026-09-27):
-the original line here claimed "all 49 tasks implemented" for 001 — 001's own
-`tasks.md` has 0 boxes checked and its `Status` said `Planned` until this same
-pass. The code that claim was gesturing at is real (see 001's corrected Status
-line above); the tasks.md-completion claim was not.
+`docs/specs/adaptive-inference-scheduler-vnext.md` (all 49 tasks implemented —
+confirmed: 001's `tasks.md` is 49/49 checked, matching its 2026-09-27 Status
+correction). An earlier pass in this same review incorrectly called this claim
+false based on a bad grep that undercounted checked boxes across all four
+specs it touched; that correction was itself wrong and is reverted here.
 
 ## Context: what already exists
 

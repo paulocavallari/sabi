@@ -3,8 +3,11 @@
 **Date:** 2026-09-27
 **Scope:** all 16 specs under `specs/` (001-evidence-aware-scheduler through
 016-sabi-control-decision-interface), cross-checked against real source in
-`packages/` and `log.md` — not against titles or `tasks.md` alone, both of
-which turn out to be unreliable (see Finding A).
+`packages/` and `log.md`. **Correction note:** an earlier version of this
+review also claimed `tasks.md` was unreliable across the board (0/N checked
+everywhere) — that claim was itself wrong, caught by automated PR review, and
+is corrected in place in Finding A below. `tasks.md` turns out to be accurate;
+only the `Status:` field in each `spec.md` was stale.
 
 This is a review pass, not a spec. Findings that warranted an immediate,
 mechanical, low-risk fix were applied directly (see "Applied in this pass"
@@ -13,46 +16,58 @@ recommendations for Hugo to make.
 
 ---
 
-## Finding A — the `Status` field and `tasks.md` are dead metadata
+## Finding A — the `Status` field was stale; `tasks.md` is actually reliable
 
-Every one of the 16 specs' `spec.md` says `**Status**: Planned`. Four are
-actually **built**, verified directly against the working tree:
+**Correction (2026-09-27, same day as the original pass):** this section
+originally claimed every `tasks.md` in all 16 specs showed 0 checked boxes,
+and on that basis "corrected" 002's true claim that 001 had all 49 tasks
+implemented into a false one. Both claims were wrong — an automated PR review
+(Codex, on #144) caught it, verified by direct recount rather than trusted on
+say-so:
 
-| Spec | Status field said | Actually built |
-|---|---|---|
-| 001-evidence-aware-scheduler | Planned | **Built** — `TrajectoryEvidence`, `VerificationState`, `RecoveryCapsule` in `packages/core/src/{types,evidence}.ts`, `packages/controller/src/{registry,types}.ts` |
-| 002-execution-evidence-substrate | Planned | **Built** — `ExecutionReceipt`/`ExecutionCapabilities` in `packages/core/src/{receipts,capabilities,router}.ts` |
-| 005-trajectory-ir-and-conformance | Planned | **Built (Phases 1, 3, 4)** — `packages/core/src/{ir,manifest,conformance,decision}.ts`. Phase 2 (compat shim) and Phase 5 (convergence) remain open |
-| 010-shadow-routing-telemetry | Planned | **Built (Phases 1-2)** — `packages/core/src/{shadow,shadow-store,shadow-sink}.ts`, wired into the server in PRs #136/#137 |
-| 003, 004, 006-009, 011, 012, 013, 016 | Planned | Confirmed unbuilt — matches status |
-| 014, 015 | Planned | The bug each describes (`capacityRank`/`preferenceRank` duplicated in both `agents.ts` and `controller.ts`) is confirmed still present |
+```
+001-evidence-aware-scheduler:      49/49 checked
+002-execution-evidence-substrate:   3/16 checked
+005-trajectory-ir-and-conformance:  7/10 checked
+010-shadow-routing-telemetry:      10/10 checked
+```
 
-Every `tasks.md` in all 16 specs shows **0 checked boxes**, including the four
-that shipped real code. `git log` / `log.md` are the only reliable record of
-what actually exists — the `specs/` directory itself does not track it.
+`tasks.md` is not dead metadata — it is a real, mostly-accurate record. The
+actual finding is narrower: the `Status:` field in `spec.md` is what's stale,
+and it's stale in one direction (says `Planned` for things that are `Built`
+or `Partial`), not across the board.
 
-**Worse:** 002's own Input line claimed *"001-evidence-aware-scheduler (all 49
-tasks implemented)"* — a direct, in-repo contradiction of 001's own
-`tasks.md` (0/49 checked) and its own `Status: Planned`, written by whoever
-authored 002.
+| Spec | Status field said | Actually built | tasks.md |
+|---|---|---|---|
+| 001-evidence-aware-scheduler | Planned | **Built** — `TrajectoryEvidence`, `VerificationState`, `RecoveryCapsule` in `packages/core/src/{types,evidence}.ts`, `packages/controller/src/{registry,types}.ts` | 49/49, matches |
+| 002-execution-evidence-substrate | Planned | **Partial** — `ExecutionReceipt`/`ExecutionCapabilities` in `packages/core/src/{receipts,capabilities,router}.ts`; but User Story 4 / FR-005 / SC-003 (every adapter emits the normalized receipt) is **not** shipped — `createAdapterEmitter` (`packages/core/src/adapter-emitter.ts`) exists only in its own definition and unit test, no Command Code/OpenCode/Hermes/Oh My Pi/Prime Agent/Orca/DSH path calls it | 3/16, matches |
+| 005-trajectory-ir-and-conformance | Planned | **Built (Phases 1, 3, 4)** — `packages/core/src/{ir,manifest,conformance,decision}.ts`. Phase 2 (compat shim) and Phase 5 (convergence) remain open | 7/10, matches |
+| 010-shadow-routing-telemetry | Planned | **Built (Phases 1-2)** — `packages/core/src/{shadow,shadow-store,shadow-sink}.ts`, wired into the server in PRs #136/#137 | 10/10, matches |
+| 003, 004, 006-009, 011, 012, 013, 016 | Planned | Confirmed unbuilt — matches status | not checked further, consistent with 0 built |
+| 014, 015 | Planned | The bug each describes (`capacityRank`/`preferenceRank` duplicated in both `agents.ts` and `controller.ts`) is confirmed still present | consistent |
+
+The one real in-repo inconsistency that survives the correction: **only the
+`Status:` line lies. `tasks.md` for every spec checked here tracks its own
+implementation state correctly.** 002's original claim about 001 ("all 49
+tasks implemented") was true and has been restored.
 
 ### Applied in this pass
 
-- `specs/001/spec.md`, `002/spec.md`, `005/spec.md`, `010/spec.md`: `Status`
-  corrected to `Built` (or `Built (Phases N)` where partial), each citing the
-  exact files that prove it and noting `tasks.md` is not the record to trust.
-- `specs/002/spec.md`: the false "49 tasks implemented" claim corrected with
-  an inline note — the underlying code claim was real, the tasks.md-completion
-  claim was not.
+- `specs/001/spec.md`, `005/spec.md`, `010/spec.md`: `Status` corrected to
+  `Built` / `Built (Phases N)`, each citing the exact files that prove it and
+  the matching `tasks.md` count.
+- `specs/002/spec.md`: `Status` corrected to **`Partial`**, not `Built` — the
+  adapter-emission user story is genuinely unshipped. 001's true "49 tasks
+  implemented" claim is restored; the earlier, incorrect "correction" of it is
+  reverted.
 
 ### Not applied — needs a real decision, not a mechanical fix
 
-`tasks.md` itself was left unchecked in all four (checking 49+ boxes by
-inference risks getting the mapping wrong in ways that are worse than the
-current honest "never touched" state). If this matters going forward, the fix
-is process, not a one-time edit: check boxes at merge time, or drop `tasks.md`
-in favor of `log.md` as the single source of "what shipped" and say so in the
-spec-kit template used to generate these.
+Whether to add a lightweight process (check boxes at merge time, or a CI check
+that `tasks.md` completion and `spec.md`'s `Status:` field can't silently
+diverge) so the `Status:` field doesn't drift stale again the way it did here
+— that's a process decision, not something to bolt on unilaterally in a
+review pass.
 
 ---
 
@@ -85,6 +100,17 @@ spec-kit template used to generate these.
   `specs/` in *this* repository never covers Live's server half at all — not
   a contradiction, but worth knowing before assuming this directory is a
   complete picture of Live.
+- **016's own internal gap** (flagged by automated PR review on #144,
+  verified against the spec text): the closed decision union is
+  `route | retry | escalate | stop`, but R4 ("fail-open, always") and
+  acceptance criterion 6 under User Story 1 both require an unreachable
+  service or a no-seam host to get an `unchanged` decision — a fifth outcome
+  the union as written has no slot for. `tasks.md` T004 also names
+  `unchanged` directly. Not fixed in this pass — this is 016's own
+  requirements text, not something to resolve by editing around it. Needs
+  either `unchanged` added to the union as a fifth variant, or an explicit
+  statement of which existing variant (`route` to the current model, most
+  likely) is defined to mean "no change."
 
 ---
 
@@ -151,6 +177,8 @@ nothing real to classify against. It blocks two other gaps, not just itself.
 4. **Regenerate or explicitly retire `docs/roadmap-12-month.md`** — fold specs
    012-016 and the PRD's 6-phase framing into a v2, or mark it superseded by
    `docs/prd.md` §46 so nobody plans against stale phase names.
-5. **Decide whether `tasks.md` is worth maintaining at all** going forward,
-   given it has never once been checked off against real, shipped code across
-   four specs that fully shipped.
+5. **Add a mechanical check that `Status:` can't silently drift from
+   `tasks.md` again** — e.g. a CI lint that flags a spec claiming `Planned`
+   with a fully-checked `tasks.md`, or vice versa. `tasks.md` itself is
+   accurate and worth keeping; it was the `Status:` field that went stale
+   unnoticed.
