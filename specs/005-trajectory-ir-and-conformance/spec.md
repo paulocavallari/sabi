@@ -4,7 +4,11 @@
 
 **Created**: 2026-09-23
 
-**Status**: Planned
+**Status**: Built (Phases 1, 3, 4) — `packages/core/src/ir.ts`, `manifest.ts`,
+`conformance.ts` and `decision.ts` are implemented. Phase 2 (compatibility
+shim) and Phase 5 (convergence) remain open. `tasks.md` was never checked off
+against this; treat `log.md`'s 2026-09-24 entry, not `tasks.md`, as the record
+of what shipped. Verified 2026-09-27 against the working tree.
 
 **Input**: Architecture synthesis — Sabi's largest gap is not the routing
 algorithm but the missing normalized contract between every harness/runtime

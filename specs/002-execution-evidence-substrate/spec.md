@@ -4,11 +4,18 @@
 
 **Created**: 2026-09-23
 
-**Status**: Planned
+**Status**: Built — `ExecutionReceipt` / `ExecutionCapabilities` are
+implemented in `packages/core/src/receipts.ts`, `capabilities.ts` and
+`router.ts`. `tasks.md` was never checked off; treat `log.md` and this note as
+the record of what shipped. Verified 2026-09-27 against the working tree.
 
 **Input**: Simplicio-material synthesis (deterministic local execution evidence as
-first-class routing input) mapped against `001-evidence-aware-scheduler` (all 49 tasks
-implemented) and `docs/specs/adaptive-inference-scheduler-vnext.md`.
+first-class routing input) mapped against `001-evidence-aware-scheduler` and
+`docs/specs/adaptive-inference-scheduler-vnext.md`. Correction (2026-09-27):
+the original line here claimed "all 49 tasks implemented" for 001 — 001's own
+`tasks.md` has 0 boxes checked and its `Status` said `Planned` until this same
+pass. The code that claim was gesturing at is real (see 001's corrected Status
+line above); the tasks.md-completion claim was not.
 
 ## Context: what already exists
 

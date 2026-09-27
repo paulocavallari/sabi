@@ -1815,3 +1815,33 @@ zero failures; `npm run typecheck` clean; `npm run eval` exits 0 (8 tasks /
 Known gap: no production `ShadowMirror` is constructed from
 `.sabi/shadow.json` yet. The wiring point exists and is tested; the controller
 side is a follow-up.
+
+## [2026-09-27] review | specs/ consolidation: status fields, a false claim, a shape conflict
+
+Reviewed all 16 `specs/`, cross-checked against real source rather than
+titles or `tasks.md` (which turns out to be unreliable — see below). Full
+findings at `docs/research/specs-consolidation-review.md`.
+
+Corrected `Status: Planned` → `Built` in 001, 002, 005, 010's `spec.md`: each
+ships real code (`TrajectoryEvidence`/`VerificationState` for 001,
+`ExecutionReceipt`/`ExecutionCapabilities` for 002, the Trajectory IR +
+manifest + conformance suite for 005 Phases 1/3/4, the shadow mirror for 010
+Phases 1-2) that the Status field never reflected. Every `tasks.md` across all
+16 specs shows 0 checked boxes, including these four — `log.md`, not
+`tasks.md`, is the record of what shipped.
+
+Fixed a real in-repo contradiction: 002's Input line claimed 001 had "all 49
+tasks implemented"; 001's own `tasks.md` and Status field said otherwise. The
+underlying code claim was true; the tasks.md-completion claim was not.
+
+Reconciled a live shape conflict: `docs/prd.md` §9 and
+`specs/016-sabi-control-decision-interface/spec.md` both define a
+`SabiDecision`, differently. 016's closed union (`route | retry | escalate |
+stop`) is now explicitly authoritative in 016's own Relationship section; the
+PRD's flat shape is illustrative only.
+
+Not applied — left as recommendations: writing the undeclared 012↔016
+escalation seam, a new spec for user policy (PRD §27) and provider discovery
+(PRD §28, which 016 itself admits is unwritten), moving 011
+(huggingface-presence) out of `specs/` into `docs/`, and retiring or
+regenerating the now-stale `docs/roadmap-12-month.md`.

@@ -1679,3 +1679,43 @@ Whether to mark these `cost: 0` with the 403 as the fail-safe, or keep
 them priced. Recorded rather than decided here: the honest answer depends on
 whether NVIDIA's allowance is a depleting signup grant or a standing one,
 which the API does not expose.
+
+---
+
+## [2026-09-27] Corrected stale Status fields and reconciled the 016/PRD decision shape
+
+### Decision
+
+Full review of all 16 `specs/`, filed at
+`docs/research/specs-consolidation-review.md`. Corrected `Status: Planned` to
+`Built` in 001, 002, 005 and 010's `spec.md` — each is substantially
+implemented in `packages/core`/`packages/controller` and the field was simply
+never updated after shipping. Fixed 002's false claim that 001 had "all 49
+tasks implemented" (001's `tasks.md` has 0 boxes checked; the underlying code
+claim was real, the tasks.md claim was not). Reconciled the `SabiDecision`
+shape conflict between `docs/prd.md` §9 and
+`specs/016-sabi-control-decision-interface/spec.md`: 016's closed union is now
+explicitly authoritative, the PRD's §9 is illustrative only.
+
+### Why
+
+Four specs shipping real code while every spec in the directory says
+`Planned` is an active liability, not a cosmetic one — it is exactly what
+almost caused a duplicate spec to get written for 016 an hour before this
+review (see `docs/research/prd-control-architecture-reconciliation.md`). The
+`SabiDecision` conflict was a live, unresolved fork between two documents
+both claiming to be the interface; leaving two shapes standing invites two
+different implementations.
+
+### Tradeoffs
+
+`tasks.md` in all four corrected specs is still unchecked — fixing that
+requires mapping each shipped file back to a specific task number, which risks
+getting the mapping wrong in a way that's worse than the current honest "never
+touched" state. Left as a recommendation, not applied.
+
+### Revisit later?
+
+If a sixth spec ships without anyone updating its `Status` field, that's a
+process problem, not a one-off — worth deciding then whether `tasks.md`
+should be dropped in favor of `log.md` as the sole shipped-state record.
