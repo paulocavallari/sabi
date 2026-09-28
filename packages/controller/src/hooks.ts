@@ -145,9 +145,20 @@ function commandFor(env: NodeJS.ProcessEnv, harness: HookHarness): string {
   // Already validated metacharacter-free above (as executable + optional arguments) — quoting
   // it here would collapse a legitimate multi-token value (e.g. `node /path/to/sabi.mjs`) into
   // one argument and break it.
-  const installed = installedSabiCli(env)
+  // A hook has to survive the thing that wrote it being moved or deleted,
+  // which is why a PATH-discovered install is preferred over whatever
+  // relative path ran setup. But "the install that is running" beats "an
+  // install that happens to be on PATH": on a machine carrying an older
+  // global @vizuh/sabi-controller, running setup from a newer checkout used
+  // to write hooks pointing at the OLD one, silently downgrading every later
+  // hook invocation to a version the operator never asked for. PATH discovery
+  // is the fallback for when the running CLI is not itself a real install --
+  // a temp copy, or a source tree.
+  const self = process.argv[1] ? path.resolve(process.argv[1]) : undefined
+  const selfIsInstall = self !== undefined && /[/\\]@vizuh[/\\]sabi-controller[/\\]dist[/\\]cli\.mjs$/.test(self)
+  const installed = selfIsInstall ? self : installedSabiCli(env)
   const executable = configured
-    ?? (installed ? `${quote(process.execPath)} ${quote(installed)}` : process.argv[1] ? `${quote(process.execPath)} ${quote(path.resolve(process.argv[1]))}` : 'sabi')
+    ?? (installed ? `${quote(process.execPath)} ${quote(installed)}` : self ? `${quote(process.execPath)} ${quote(self)}` : 'sabi')
   return `${executable} hook ${harness}`
 }
 

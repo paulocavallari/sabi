@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { buildEffectiveRequestEnvelope, ensureRouteCompatible, route, SabiRouteError } from '../src/index.ts'
+import { modelRouteCost } from '../src/compatibility.ts'
 import { validateConfig } from '../src/config.ts'
 import type { ChatRequestBody, ModelCapabilities, ModelEntry, SabiConfig } from '../src/types.ts'
 
@@ -535,4 +536,28 @@ test('the unavailable-upstream fallback is cheapest-first, independent of declar
   assert.equal(routedB.tier, 'mid', 'same tier set in a different order resolves the same way')
   assert.equal(routedA.rule, 'availability')
   assert.equal(routedB.rule, 'availability')
+})
+
+test('an unknown price sorts after every known price, and is never read as free', () => {
+  // The nvidia tiers were declared cost 0 because they were assumed to be
+  // OpenRouter :free variants. They are metered on NVIDIA's native API, and
+  // the zero was a guess presented as a fact -- it made metered routes look
+  // free and handed them the cheap-first ordering against routes whose price
+  // is actually known.
+  //
+  // An omitted cost must read as UNKNOWN, not as zero: unknown must lose to
+  // every known price rather than tie with the free ones and win on ordering.
+  const withoutCost = (model: string): ModelEntry => {
+    const { cost: _cost, ...rest } = catalog({ model })
+    return rest
+  }
+  const unknown = modelRouteCost(withoutCost('synthetic-unknown'))
+  assert.equal(unknown, Number.POSITIVE_INFINITY, 'a missing price is unknown, not zero')
+
+  const free = modelRouteCost(catalog({ model: 'synthetic-free', cost: { input: 0, output: 0 } }))
+  const metered = modelRouteCost(catalog({ model: 'synthetic-metered', cost: { input: 1, output: 2 } }))
+  assert.equal(free, 0, 'a verified free route stays free')
+  assert.ok(metered > free, 'a known price beats free')
+  assert.ok(metered < unknown, 'a known price must beat an unknown one')
+  assert.ok(unknown > metered, 'unknown must sort last, never alongside free')
 })
