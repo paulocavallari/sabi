@@ -360,14 +360,23 @@ function modelSummary(config: SabiConfig) {
     return windows.length && windows.every((value): value is number =>
       typeof value === 'number' && Number.isFinite(value) && value > 0) ? Math.min(...windows) : undefined
   }
-  return Object.entries(config.aliases).map(([id, target]) => ({
-    id,
-    object: 'model',
-    created: 0,
-    owned_by: 'sabi',
-    context_window: contextWindowFor(target),
-    sabi: { target, model: target === 'auto' ? 'adaptive' : config.models[target]?.model },
-  }))
+  return Object.entries(config.aliases)
+    // The advertised list is the product surface, and it is deliberately
+    // small. A client that renders every alias turns Sabi back into a model
+    // picker, which is the thing Sabi was built to stop being. Diagnostic
+    // tiers stay routable by name for an operator who already knows them.
+    .filter(([, target]) => {
+      if (target === 'auto') return true
+      return config.models[target]?.visibility !== 'diagnostic'
+    })
+    .map(([id, target]) => ({
+      id,
+      object: 'model',
+      created: 0,
+      owned_by: 'sabi',
+      context_window: contextWindowFor(target),
+      sabi: { target, model: target === 'auto' ? 'adaptive' : config.models[target]?.model },
+    }))
 }
 
 export function createSabiServer(options: SabiServerOptions): SabiServer {

@@ -340,6 +340,17 @@ export interface ContextAccounting {
 export interface ModelEntry {
   upstream: string
   model: string
+  /**
+   * Whether this tier belongs in the model list a client shows a person.
+   *
+   * Sabi exists to remove model-picking decisions. A picker carrying every
+   * diagnostic route does the opposite: it hands the decision back. So the
+   * advertised surface is deliberately small — the adaptive alias plus the
+   * cheap/mid/strong escape hatches — and everything else is `diagnostic`:
+   * still routable by name for an operator who knows it, invisible to anyone
+   * choosing. Adding a provider MUST NOT add a row here.
+   */
+  visibility?: 'default' | 'diagnostic'
   contextWindow?: number
   maxOutputTokens?: number
   capabilities?: ModelCapabilities

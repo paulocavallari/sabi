@@ -1802,3 +1802,61 @@ top of the reconciliation doc so the two don't drift apart silently.
 When Sabi Live gets its first real spec (the PRD's layer 2, sections 15-21) —
 check whether the ClickHouse/Postgres split and telemetry schema here still
 match what actually gets built.
+
+## 2026-09-28 — The advertised model list is a product surface, not an inventory
+
+### Context
+
+Adding providers had produced eleven advertised aliases. A client that renders
+them all — OMP did exactly this — shows a picker with `sabi-code`,
+`sabi-cheap`, `sabi-mid`, `sabi-strong`, `sabi-local`, `sabi-gemini`,
+`sabi-nv-fast`, `sabi-nv-max`, `sabi-mistral`, `sabi-independent` and
+`sabi-stealth`. Hugo's objection: Sabi exists to remove the model-picking
+decision, and a list of eleven options hands that decision straight back. It is
+a different list, not a shorter one.
+
+The routes are genuinely useful. Mistral is there because its key is one of the
+few that work; `sabi-independent` exists because space-bunny is funded outside
+the shared daily pool. Both are reasons to keep the route, and neither is a
+reason to show it to someone choosing.
+
+### Decision
+
+`ModelEntry.visibility` is `'default' | 'diagnostic'`, defaulting to
+`'default'`. `/v1/models` lists only default tiers plus the adaptive alias.
+Diagnostic tiers stay routable by name.
+
+**The advertised surface is four entries:** `sabi-code`, `sabi-cheap`,
+`sabi-mid`, `sabi-strong`. The last three are escape hatches for someone who
+wants to pin a tier deliberately; they are not a menu to browse.
+
+**Adding a provider MUST NOT add a row to that list.** New providers and new
+adapters default to `diagnostic` unless there is a specific reason a person
+should be choosing between them. The burden of proof runs toward invisibility,
+because the cost of a row is a decision handed back to the user and the cost of
+a hidden row is a name nobody needed.
+
+Omitting the field keeps existing installs unchanged, so this is a choice each
+install makes rather than a breaking change.
+
+### Why
+
+The failure this prevents is not a long list. It is Sabi quietly reverting into
+a model picker while still claiming to be a router — which is the exact drift
+the architecture audit found in the routing core, one layer out. A tier exists
+so the router can choose it. A tier in `/v1/models` exists so a person can
+choose it. Those are different instruments and conflating them costs the
+product the thing it is selling.
+
+### Scope
+
+Applies to `/v1/models` and anything rendering it. It does NOT remove routes,
+remove aliases, or change eligibility. `sabi-mistral` still works; it is simply
+not offered.
+
+### Known gap
+
+The diagnostic tiers are reachable but undiscoverable, which is correct for an
+operator and unhelpful for a first-time user who wonders why Mistral exists.
+The answer belongs in a status or explain surface, not in the model picker —
+and that surface does not exist yet.

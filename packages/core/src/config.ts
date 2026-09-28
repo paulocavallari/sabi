@@ -499,6 +499,13 @@ export function validateConfig(value: unknown, source = '<inline>'): SabiConfig 
     }
   }
 
+  // Validate the advertised-surface flag where models are checked.
+  for (const [tierName, entry] of Object.entries(config.models)) {
+    if (entry.visibility !== undefined && entry.visibility !== 'default' && entry.visibility !== 'diagnostic') {
+      throw new Error(`Sabi config ${source}: models.${tierName}.visibility must be 'default' or 'diagnostic'`)
+    }
+  }
+
   const capacity = config.capacity
   if (capacity !== undefined) {
     if (typeof capacity !== 'object' || capacity === null || Array.isArray(capacity)) {
