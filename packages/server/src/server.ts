@@ -34,6 +34,7 @@ import {
   type RouteDecision,
   type SabiConfig,
 } from '@sabi/core'
+import { renderDashboard } from './dashboard.ts'
 import { createSseTap, UpstreamStreamError, type SseTapResult } from './sse.ts'
 import { handlePassthrough, type PassthroughFormat } from './passthrough.ts'
 import { createTypesafeClient, type JudgeClient } from './typesafe.ts'
@@ -498,95 +499,9 @@ async function handleRequest(state: ServerState, req: IncomingMessage, res: Serv
     return
   }
   if (req.method === 'GET' && path === '/dashboard') {
-    const total = state.recent.reduce((acc, rec) => {
-      const u = rec.usage;
-      if (u) {
-        acc.prompt += u.promptTokens;
-        acc.completion += u.completionTokens;
-        acc.cached += u.cachedTokens;
-        acc.total += u.totalTokens;
-      }
-      return acc;
-    }, { prompt: 0, completion: 0, cached: 0, total: 0 });
-
-    const byModel = state.recent.reduce((map, rec) => {
-      const u = rec.usage;
-      if (!u) return map;
-      const model = rec.servedModel || rec.alias || 'unknown';
-      const existing = map.get(model) || { prompt: 0, completion: 0, total: 0 };
-      existing.prompt += u.promptTokens;
-      existing.completion += u.completionTokens;
-      existing.total += u.totalTokens;
-      map.set(model, existing);
-      return map;
-    }, new Map());
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Sabi Dashboard</title>
-        <style>
-          body { font-family: sans-serif; margin: 2rem; }
-          h1 { color: #2c3e50; }
-          .stats { display: flex; gap: 2rem; margin-top: 1rem; }
-          .stat { background: #f8f9fa; padding: 1rem; border-radius: 4px; min-width: 150px; }
-          .stat h2 { margin-top: 0; color: #3498db; }
-          .stat p { font-size: 1.5rem; margin: 0.5rem 0 0; }
-          table { width: 100%; border-collapse: collapse; margin-top: 2rem; }
-          th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
-          th { background-color: #f2f2f2; }
-        </style>
-      </head>
-      <body>
-        <h1>Sabi Token Usage Dashboard</h1>
-        <div class="stats">
-          <div class="stat">
-            <h2>Prompt Tokens</h2>
-            <p>${total.prompt.toLocaleString()}</p>
-          </div>
-          <div class="stat">
-            <h2>Completion Tokens</h2>
-            <p>${total.completion.toLocaleString()}</p>
-          </div>
-          <div class="stat">
-            <h2>Cached Tokens</h2>
-            <p>${total.cached.toLocaleString()}</p>
-          </div>
-          <div class="stat">
-            <h2>Total Tokens</h2>
-            <p>${total.total.toLocaleString()}</p>
-          </div>
-        </div>
-        <h2>Usage by Model</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th>Prompt</th>
-              <th>Completion</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${Array.from(byModel.entries())
-              .map(([model, u]) => `
-                <tr>
-                  <td>${model}</td>
-                  <td>${u.prompt.toLocaleString()}</td>
-                  <td>${u.completion.toLocaleString()}</td>
-                  <td>${u.total.toLocaleString()}</td>
-                </tr>
-              `)
-              .join('')}
-          </tbody>
-        </table>
-      </body>
-      </html>
-    `;
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.writeHead(200);
-    res.end(html);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.writeHead(200)
+    res.end(renderDashboard(state.recent))
     return
   }
   sendError(res, 404, `no route for ${req.method} ${path}`, 'not_found')
