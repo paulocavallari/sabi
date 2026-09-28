@@ -36,6 +36,14 @@ function run(args: string[], cwd: string, env: Record<string, string> = {}) {
       ...process.env,
       SABI_LOG: undefined,
       ORCA_CLI_COMMAND: '/nonexistent/sabi-test-orca-binary',
+      // State-dir isolation: controllerStateDir() falls back to
+      // $XDG_STATE_HOME/sabi, which is the developer's real directory.
+      // Without this, `status` and `doctor` read the developer's own daemon
+      // state, so the tests pass on a clean CI box and fail on every machine
+      // that has actually installed Sabi -- backwards, since the machines
+      // needing the coverage most are the ones where it cannot run. Same
+      // reasoning as the harness-config isolation below.
+      SABI_CONTROLLER_HOME: path.join(cwd, 'sabi-state'),
       // Harness-config isolation: an Orca terminal exports a real shared OpenCode
       // config dir and a CODEX_HOME, and the user's real ~/.claude exists, so a
       // spawned `sabi setup` could otherwise install hooks into live host configs.
@@ -62,6 +70,8 @@ function runAsync(args: string[], cwd: string, env: Record<string, string> = {})
         ...process.env,
         SABI_LOG: undefined,
         ORCA_CLI_COMMAND: '/nonexistent/sabi-test-orca-binary',
+        // State-dir isolation: same contract as run() — see the note there.
+        SABI_CONTROLLER_HOME: path.join(cwd, 'sabi-state'),
         // Harness-config isolation: same contract as run() — a spawned CLI must
         // resolve every harness config inside the throwaway cwd.
         SABI_CLAUDE_SETTINGS: path.join(cwd, 'claude', 'settings.json'),

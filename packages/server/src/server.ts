@@ -695,7 +695,11 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
       (upstreamResponse.status === 429 || upstreamResponse.status === 402 || upstreamResponse.status === 403) &&
       decision.mode === 'auto' && config.transportFallback?.enabled === true) {
       const required = decision.state.inputModalities ?? []
-      for (const fallback of getFallbackChain(config, decision.tier, required)) {
+      // A 429 is a statement about the POOL, not the model. Passing it in
+      // lets the chain leave the shared daily allowance instead of walking
+      // through the fifteen other models that draw on the same exhausted one.
+      const quotaRefusal = upstreamResponse.status === 429
+      for (const fallback of getFallbackChain(config, decision.tier, required, quotaRefusal)) {
         const attempt: RouteDecision = {
           ...decision,
           tier: fallback.tier,

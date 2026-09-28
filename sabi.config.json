@@ -1,5 +1,5 @@
 {
-  "provenance": "Operator rule (2026-09-22): OpenRouter may serve FREE models only. The openrouter upstream declares paidModelsAllowed:false, so any model whose price is unknown or non-zero is refused at dispatch (packages/core/src/compatibility.ts) \u2014 a config mistake cannot spend money. Every openrouter model id below carries the :free variant and cost 0. Ids, context windows, output ceilings, modalities and zero pricing verified live from https://openrouter.ai/api/v1/models and a real completion per id on 2026-09-22. Jev (TypeSafe judge) is a separate upstream and unaffected by this rule. Operator rule (2026-09-23): Claude Code and Codex are used through their own subscriptions \u2014 Sabi installs hooks into them and never writes a provider base URL, an API key or a model override into either harness, so neither can become per-token spend through Sabi. Guarded by packages/controller/test/hooks.test.ts. Operator rule (2026-09-23): transport fallback is ON. Every configured tier is an OpenRouter `:free` model, and those are served from shared upstream pools that rate-limit the whole pool (`limit_source: upstream_provider_shared_pool` in the provider's own 429 body), so a 429 on one free model is routed to the next serving tier instead of ending the round. Fixed aliases are unaffected by design. Operator addition (2026-09-25): native Gemini via the OpenAI-compatible surface. It is NOT in the policy tiers, so default routing never selects it. It is the one upstream with paidModelsAllowed:true and must be requested by name (`sabi-gemini`). Google publishes RPM/TPM/RPD quotas per PROJECT, not per key, and no per-token price for a Free-tier key, so it cannot be proven free and is not claimed to be. Operator addition (2026-09-25): NVIDIA and Mistral upstreams added. Only models verified with a real completion against this account are listed -- codestral-latest, mistral-code-latest, nvidia/nemotron-3-super-120b-a12b, nvidia/nemotron-3-ultra-550b-a55b, nvidia/nemotron-3-nano-omni-30b-a3b-reasoning. The remaining NVIDIA catalogue entries return 404 'not found for account' or 410 Gone on this key and are deliberately absent. Both upstreams are metered and carry paidModelsAllowed:true; the openrouter free-only rule is unchanged and still enforced per-upstream. Context windows for the NVIDIA models come from the OpenRouter catalogue because NVIDIA's own /v1/models omits them.",
+  "provenance": "Operator rule (2026-09-22): OpenRouter may serve FREE models only. The openrouter upstream declares paidModelsAllowed:false, so any model whose price is unknown or non-zero is refused at dispatch (packages/core/src/compatibility.ts) \u2014 a config mistake cannot spend money. Every openrouter model id below carries the :free variant and cost 0. Ids, context windows, output ceilings, modalities and zero pricing verified live from https://openrouter.ai/api/v1/models and a real completion per id on 2026-09-22. Jev (TypeSafe judge) is a separate upstream and unaffected by this rule. Operator rule (2026-09-23): Claude Code and Codex are used through their own subscriptions \u2014 Sabi installs hooks into them and never writes a provider base URL, an API key or a model override into either harness, so neither can become per-token spend through Sabi. Guarded by packages/controller/test/hooks.test.ts. Operator rule (2026-09-23): transport fallback is ON. Every configured tier is an OpenRouter `:free` model, and those are served from shared upstream pools that rate-limit the whole pool (`limit_source: upstream_provider_shared_pool` in the provider's own 429 body), so a 429 on one free model is routed to the next serving tier instead of ending the round. Fixed aliases are unaffected by design. Operator addition (2026-09-25): native Gemini via the OpenAI-compatible surface. It is NOT in the policy tiers, so default routing never selects it. It is the one upstream with paidModelsAllowed:true and must be requested by name (`sabi-gemini`). Google publishes RPM/TPM/RPD quotas per PROJECT, not per key, and no per-token price for a Free-tier key, so it cannot be proven free and is not claimed to be. Operator addition (2026-09-25): NVIDIA and Mistral upstreams added. Only models verified with a real completion against this account are listed -- codestral-latest, mistral-code-latest, nvidia/nemotron-3-super-120b-a12b, nvidia/nemotron-3-ultra-550b-a55b, nvidia/nemotron-3-nano-omni-30b-a3b-reasoning. The remaining NVIDIA catalogue entries return 404 'not found for account' or 410 Gone on this key and are deliberately absent. Both upstreams are metered and carry paidModelsAllowed:true; the openrouter free-only rule is unchanged and still enforced per-upstream. Context windows for the NVIDIA models come from the OpenRouter catalogue because NVIDIA's own /v1/models omits them. Operator correction (2026-09-28): the NVIDIA tiers pointed at the PAID model ids while free variants of the same models sat in the same catalogue -- nvidia/nemotron-3-ultra-550b-a55b:free and nvidia/nemotron-3-super-120b-a12b:free are both proven 0/0. All three NVIDIA tiers now use the :free ids and declare cost 0. quotaPool is recorded on every tier because seventeen :free models share ONE daily allowance: a 429 on any of them is a statement about all of them, and a lane that counts models rather than pools looks healthy until it can serve nothing. stealth/space-bunny-alpha is priced 0/0 with no :free suffix, so it is funded outside that pool and survives its exhaustion. It is now the 'independent' tier rather than a debugging alias. openrouter/free is excluded from every tier: it is a router that resolves to whichever free model it likes, so the model that answers is never the one named.",
   "server": {
     "host": "127.0.0.1",
     "port": 8787
@@ -65,7 +65,8 @@
       "cost": {
         "input": 0,
         "output": 0
-      }
+      },
+      "quotaPool": "shared-free-daily"
     },
     "mid": {
       "upstream": "openrouter",
@@ -81,7 +82,8 @@
       "cost": {
         "input": 0,
         "output": 0
-      }
+      },
+      "quotaPool": "shared-free-daily"
     },
     "strong": {
       "upstream": "openrouter",
@@ -96,7 +98,8 @@
       "cost": {
         "input": 0,
         "output": 0
-      }
+      },
+      "quotaPool": "shared-free-daily"
     },
     "local": {
       "upstream": "ollama",
@@ -111,7 +114,8 @@
       "cost": {
         "input": 0,
         "output": 0
-      }
+      },
+      "quotaPool": "none"
     },
     "gemini": {
       "upstream": "gemini",
@@ -126,11 +130,12 @@
       "cost": {
         "input": 0.75,
         "output": 3.75
-      }
+      },
+      "quotaPool": "none"
     },
     "nv-code-fast": {
       "upstream": "nvidia",
-      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
       "contextWindow": 262144,
       "maxOutputTokens": 235929,
       "capabilities": {
@@ -139,13 +144,14 @@
         ]
       },
       "cost": {
-        "input": 0.08,
-        "output": 0.45
-      }
+        "input": 0,
+        "output": 0
+      },
+      "quotaPool": "shared-free-daily"
     },
     "nv-max": {
       "upstream": "nvidia",
-      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
       "contextWindow": 1000000,
       "maxOutputTokens": 65536,
       "capabilities": {
@@ -154,13 +160,14 @@
         ]
       },
       "cost": {
-        "input": 0.6,
-        "output": 2.4
-      }
+        "input": 0,
+        "output": 0
+      },
+      "quotaPool": "shared-free-daily"
     },
     "nv-nano": {
       "upstream": "nvidia",
-      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
       "contextWindow": 131072,
       "maxOutputTokens": 32768,
       "capabilities": {
@@ -169,9 +176,10 @@
         ]
       },
       "cost": {
-        "input": 0.0,
-        "output": 0.0
-      }
+        "input": 0,
+        "output": 0
+      },
+      "quotaPool": "shared-free-daily"
     },
     "mistral-code": {
       "upstream": "mistral",
@@ -186,7 +194,8 @@
       "cost": {
         "input": 0.3,
         "output": 0.9
-      }
+      },
+      "quotaPool": "none"
     },
     "mistral-code2": {
       "upstream": "mistral",
@@ -201,7 +210,25 @@
       "cost": {
         "input": 0.3,
         "output": 0.9
-      }
+      },
+      "quotaPool": "none"
+    },
+    "independent": {
+      "upstream": "openrouter",
+      "model": "stealth/space-bunny-alpha",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "capabilities": {
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      "cost": {
+        "input": 0,
+        "output": 0
+      },
+      "quotaPool": "independent"
     }
   },
   "aliases": {
@@ -213,7 +240,9 @@
     "sabi-gemini": "gemini",
     "sabi-nv-fast": "nv-code-fast",
     "sabi-nv-max": "nv-max",
-    "sabi-mistral": "mistral-code"
+    "sabi-mistral": "mistral-code",
+    "sabi-independent": "independent",
+    "sabi-stealth": "independent"
   },
   "policy": {
     "failure": "strong",

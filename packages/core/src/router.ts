@@ -1,4 +1,5 @@
 import { cheapestServingTier, ensureRouteCompatible, isEnabledUpstream, modelRouteCost, SabiRouteError, servesInputModalities, servesUpstreamBilling } from './compatibility.ts'
+import { quotaPoolOf, sameQuotaPool } from './quota-pool.ts'
 import { cacheAwareRoute } from './cache-routing.ts'
 import { tiersFor } from './config.ts'
 import { decideTier } from './policy.ts'
@@ -21,19 +22,43 @@ export interface FallbackTier {
   upstreamModel: string
 }
 
-export function getFallbackChain(config: SabiConfig, failedTier: string, required: readonly ModelModality[] = []): FallbackTier[] {
+export function getFallbackChain(
+  config: SabiConfig,
+  failedTier: string,
+  required: readonly ModelModality[] = [],
+  /**
+   * When the failure was a quota refusal rather than an outage, a candidate
+   * in the SAME pool is not a fallback.
+   *
+   * Seventeen `:free` models share one daily allowance, so a 429 on any of
+   * them is a statement about all of them. Walking the chain in cost order
+   * therefore tried `mid` and then `strong` — both inside the pool that had
+   * just refused — burning two upstream calls to learn nothing. Leaving the
+   * pool is the only move that can succeed.
+   */
+  quotaRefusal = false,
+): FallbackTier[] {
   const failedModel = config.models[failedTier]
   if (!failedModel) return []
   return Object.keys(config.models)
     .filter((name) => {
       if (name === failedTier) return false
       const entry = config.models[name]
-      return entry !== undefined &&
-        isEnabledUpstream(config.upstreams[entry.upstream]) &&
+      if (entry === undefined) return false
+      if (quotaRefusal && sameQuotaPool(failedModel, entry)) return false
+      return isEnabledUpstream(config.upstreams[entry.upstream]) &&
         servesUpstreamBilling(config.upstreams[entry.upstream], entry) &&
         servesInputModalities(entry.capabilities?.inputModalities, required)
     })
     .sort((a, b) => {
+      // When the pool is spent, a different pool outranks a cheaper model in
+      // the same one. The daily allowance is shared, so cost is not the
+      // scarce resource here — availability is.
+      if (quotaRefusal) {
+        const pa = quotaPoolOf(config.models[a]!)
+        const pb = quotaPoolOf(config.models[b]!)
+        if (pa !== pb) return pa === 'independent' ? -1 : 1
+      }
       const costA = modelRouteCost(config.models[a])
       const costB = modelRouteCost(config.models[b])
       if (costA !== costB) return costA - costB
