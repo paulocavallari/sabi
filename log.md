@@ -1815,3 +1815,17 @@ zero failures; `npm run typecheck` clean; `npm run eval` exits 0 (8 tasks /
 Known gap: no production `ShadowMirror` is constructed from
 `.sabi/shadow.json` yet. The wiring point exists and is tested; the controller
 side is a follow-up.
+
+## [2026-09-27] docs | Filed the Sabi PRD and an architecture-reconciliation note
+
+Two external documents filed as received: `docs/prd.md` (v1.0, the Router →
+Live → Control product vision) and
+`docs/research/prd-control-architecture-reconciliation.md` (maps the PRD onto
+the current proxy/controller/hook runtime — coding harness, session hook,
+controller daemon at :7433, Sabi proxy at :8787, Jev, providers, local state
+— and argues the gap to Control is smaller than the PRD alone suggests, since
+`specs/016-sabi-control-decision-interface/` covers most of the `decide()`
+surface it proposes). That spec lands via a companion PR (#144), not this one
+— at this commit `specs/012/013/016` are not yet on `main` (flagged by
+automated PR review, corrected 2026-09-27). Decision logged in
+`docs/decisions.md` (2026-09-27). No code changed; docs only.

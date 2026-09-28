@@ -1606,3 +1606,49 @@ unchanged in character from the pre-existing baseline.
 Nothing constructs a `ShadowMirror` from `.sabi/shadow.json` in production yet.
 The wiring point exists and is tested; the controller side is a follow-up. This
 is stated in the PR body rather than left for someone to discover.
+
+---
+
+## [2026-09-27] Filed the Sabi PRD (Router → Live → Control) at `docs/prd.md`
+
+### Decision
+
+Adopted an external v1.0 PRD as the top-level product vision document, filed
+verbatim at `docs/prd.md`. It sits above the numbered `specs/` — it is the
+umbrella narrative (three layers: Router, Live, Control) that specs 001, 010,
+012, 013 and 016 each implement a bounded piece of, not itself a bounded,
+implementable spec. A companion architecture-reconciliation note (external
+analysis, filed as received) lives at
+`docs/research/prd-control-architecture-reconciliation.md`; it maps the PRD
+onto the current proxy/controller/hook runtime and argues the gap to Control
+is smaller than the PRD alone suggests.
+
+**Sequencing note (2026-09-27, flagged by automated PR review):** at the
+commit this PR lands on, `specs/012`, `013` and `016` are not yet on `main` —
+they exist on a companion branch/PR (specs consolidation, #144) built off a
+different, not-yet-pushed local history. The references to `specs/016` below
+describe where that spec will live once #144 merges, not a file present in
+this repository at this PR's own commit. Do not follow that path expecting it
+to resolve until #144 lands.
+
+### Why
+
+The PRD's one-rule product-drift test — "does this feature help Sabi decide
+what intelligence to use, or does it help the agent perform the work" —
+matches the boundary `specs/016-sabi-control-decision-interface/spec.md`
+independently defends ("Do not build a coding agent") once that spec lands.
+Filing the PRD locally makes that boundary citable instead of living only in
+chat history.
+
+### Tradeoffs
+
+The PRD and spec 016 overlap substantially on the `SabiState`/`SabiDecision`/
+`decide()` shape. Spec 016 is authoritative for that surface; the PRD and the
+reconciliation note are context, not a second source of truth — noted at the
+top of the reconciliation doc so the two don't drift apart silently.
+
+### Revisit later?
+
+When Sabi Live gets its first real spec (the PRD's layer 2, sections 15-21) —
+check whether the ClickHouse/Postgres split and telemetry schema here still
+match what actually gets built.
