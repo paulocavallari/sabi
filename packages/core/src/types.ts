@@ -440,6 +440,25 @@ export interface ControllerConfig {
   harnessRouting?: ControllerHarnessRoutingConfig
 }
 
+/**
+ * A pool of capacity the host serves itself.
+ *
+ * `executor` is always 'host' for these. Sabi routes by recommending;
+ * it does not dial a subscription it was never handed a key for.
+ */
+export interface CapacityPool {
+  /** Free-text for the operator; never parsed. */
+  description?: string
+  executor: 'host'
+  models: Record<string, {
+    contextWindow?: number
+    maxOutputTokens?: number
+    capabilities?: { inputModalities?: ModelModality[] }
+    /** Proven zero on both sides, or the pool is not a free pool. */
+    cost?: { input: number; output: number }
+  }>
+}
+
 export interface SabiConfig {
   provenance?: string
   server?: { host?: string; port?: number }
@@ -456,6 +475,21 @@ export interface SabiConfig {
     tiers: Record<string, CatalogTier>
     contextWindow?: number
   }
+  /**
+   * Capacity the host can serve but Sabi cannot reach with a credential.
+   *
+   * A host running Sabi may already hold capacity the router knows nothing
+   * about: a subscription, an orchestrator-injected model, an agent runtime
+   * with its own allowance. That pool is the one the operator has no key for
+   * and no bill to fear, so it is the first thing to consider when a provider
+   * credential dies — and until this existed, Sabi could not even see it.
+   *
+   * `executor: 'host'` is load-bearing. Sabi does NOT execute these. It
+   * recommends them and the host applies the decision, which is a different
+   * code path from dispatch. Declaring something Sabi could dial belongs in
+   * `upstreams`, not here.
+   */
+  capacity?: Record<string, CapacityPool>
   /**
    * Opt-in retry of transport failures (429/402/403) on the next serving tier.
    * Omitted or false: the first upstream error is served as-is (current behavior).
