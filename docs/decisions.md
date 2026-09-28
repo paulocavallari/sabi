@@ -1607,6 +1607,156 @@ Nothing constructs a `ShadowMirror` from `.sabi/shadow.json` in production yet.
 The wiring point exists and is tested; the controller side is a follow-up. This
 is stated in the PR body rather than left for someone to discover.
 
+## 2026-09-25 — A free tier is not a free price (NVIDIA, Mistral, Gemini)
+
+### Context
+
+Three providers were wired as upstreams and tested against live keys on
+2026-09-25: NVIDIA NIM, Mistral, and native Gemini. The intent was to widen
+the free lane. What the testing produced was a distinction the catalogue
+model does not currently express.
+
+Mistral refuses a model outside the account's tier:
+
+```json
+{"message":"This model is not available in your subscription tier",
+ "type":"tier_not_allowed","code":"1910","raw_status_code":403}
+```
+
+`codestral-latest` and `mistral-code-latest` are inside the tier.
+`mistral-large-latest` is not. The account is on a restricted tier and the
+tier — not a price — decides what runs.
+
+NVIDIA returned `404 Not found for account` for 20 of 25 tested models and
+`410 Gone` for the rest. Three responded to real completions. No credits or
+usage endpoint is exposed, so the exhaustion boundary cannot be observed
+before it is hit.
+
+Neither provider publishes per-token pricing through a machine-readable
+feed. `determineFree` therefore returns `unknown` for every model on both,
+and Gemini, whose 33 catalogue entries are all priced non-zero, returns
+`paid` for all of them.
+
+### Decision
+
+**A free tier, a credit balance, and a zero price are three different
+facts, and only the third is provable from a catalogue.**
+
+| | OpenRouter `:free` | Mistral free tier | NVIDIA credits |
+|---|---|---|---|
+| Zero-priced | yes, unconditionally | no — tier-restricted | no — finite balance |
+| On exhaustion | stays free, throttles | model leaves the tier | 404 / 410, or a charge |
+| Provable from a catalogue | yes | no | no |
+
+A credit balance is zero until it is not. Treating that as `free: true` is
+the same category of error as treating a 200 that carries an error body as
+a successful round: a success that was never verified.
+
+The three providers are therefore recorded with `paidModelsAllowed: true`
+and at list price. That is the conservative reading and it has a real cost:
+**Sabi's free-only lane will not route to capacity the operator is not
+paying for**, which is the opposite of the product's intent.
+
+`openrouter.paidModelsAllowed: false` is unchanged and still enforced
+per-upstream. The free-only rule was never global and still is not.
+
+### Consequences
+
+- Only models verified by a real completion against the operator's own key
+  are listed. The unlisted NVIDIA catalogue entries are absent because they
+  return 404 or 410, not because they were overlooked.
+- The quota dimension is not optional. `quota_state` is the only honest
+  representation of a tier- or credit-bounded allowance, which is the
+  argument in spec 013 for keeping capability, availability, and user
+  eligibility separate.
+- A future free-lane entry for these providers needs a policy that admits
+  tier-bounded free capacity explicitly, and a demotion trigger on the
+  403/404 transition. Neither exists yet.
+
+### Open
+
+Whether to mark these `cost: 0` with the 403 as the fail-safe, or keep
+them priced. Recorded rather than decided here: the honest answer depends on
+whether NVIDIA's allowance is a depleting signup grant or a standing one,
+which the API does not expose.
+
+---
+
+## [2026-09-27] Corrected stale Status fields and reconciled the 016/PRD decision shape
+
+### Decision
+
+Full review of all 16 `specs/`, filed at
+`docs/research/specs-consolidation-review.md`. Corrected `Status: Planned` to
+`Built` in 001, 002, 005 and 010's `spec.md` — each is substantially
+implemented in `packages/core`/`packages/controller` and the field was simply
+never updated after shipping. Fixed 002's false claim that 001 had "all 49
+tasks implemented" (001's `tasks.md` has 0 boxes checked; the underlying code
+claim was real, the tasks.md claim was not). Reconciled the `SabiDecision`
+shape conflict between `docs/prd.md` §9 and
+`specs/016-sabi-control-decision-interface/spec.md`: 016's closed union is now
+explicitly authoritative, the PRD's §9 is illustrative only.
+
+### Why
+
+Four specs shipping real code while every spec in the directory says
+`Planned` is an active liability, not a cosmetic one — it is exactly what
+almost caused a duplicate spec to get written for 016 an hour before this
+review (see `docs/research/prd-control-architecture-reconciliation.md`). The
+`SabiDecision` conflict was a live, unresolved fork between two documents
+both claiming to be the interface; leaving two shapes standing invites two
+different implementations.
+
+### Tradeoffs
+
+`tasks.md` in all four corrected specs is still unchecked — fixing that
+requires mapping each shipped file back to a specific task number, which risks
+getting the mapping wrong in a way that's worse than the current honest "never
+touched" state. Left as a recommendation, not applied.
+
+### Revisit later?
+
+If a sixth spec ships without anyone updating its `Status` field, that's a
+process problem, not a one-off — worth deciding then whether `tasks.md`
+should be dropped in favor of `log.md` as the sole shipped-state record.
+
+---
+
+## [2026-09-27] Corrected the consolidation review itself: tasks.md was never unreliable
+
+### Decision
+
+The review above claimed every `tasks.md` across all 16 specs showed 0
+checked boxes, and on that basis "corrected" 002's true claim that 001 had
+all 49 tasks implemented into a false one. Both claims were wrong. Automated
+PR review (Codex, on #144) caught it; verified by direct recount, not
+trusted on say-so: 001 is 49/49 checked, 002 is 3/16, 005 is 7/10, 010 is
+10/10 — `tasks.md` is accurate. 002's `Status` is corrected to `Partial`
+(not `Built`) after confirming `createAdapterEmitter` exists only in its own
+definition and unit test — no adapter production path calls it, so User
+Story 4 is genuinely unshipped. 001's original true claim is restored.
+
+### Why
+
+A review whose central finding is "don't trust this file, trust the code"
+should not itself skip verifying the file it dismissed. The undercounting
+bug's exact cause wasn't isolated — worth being honest that it wasn't traced,
+only caught and fixed. The fix is to record the correction plainly, the same
+way `tasks.md` review dashboards. Also flagged by the same PR review and left
+open here: `specs/016`'s closed decision union (`route|retry|escalate|stop`)
+has no slot for the `unchanged` outcome its own R4 and acceptance criteria
+require — noted in `docs/research/specs-consolidation-review.md`, not fixed,
+since it's 016's requirements text and not this review's to silently resolve.
+
+### Tradeoffs
+
+None avoided by leaving this uncorrected — it would have stood as a false
+claim in a document whose whole purpose is catching exactly that kind of
+thing elsewhere in the repo.
+
+### Revisit later?
+
+Not applicable — this is the correction itself.
 ---
 
 ## [2026-09-27] Filed the Sabi PRD (Router → Live → Control) at `docs/prd.md`
