@@ -1999,3 +1999,33 @@ Consequences, recorded so they are not re-derived:
    OMP**. It degrades to choosing from a configured list. The rule stands for
    hosts that can report a catalog; OMP is not one. Rule 1 is therefore a
    property of capable hosts, not a universal promise.
+
+## 2026-09-28 — OMP's RPC mode is a complete host-control surface (probed)
+
+Found while probing what an OMP host can be asked to do, 2026-09-28, OMP 18.4.1.
+
+`omp --mode rpc` speaks newline-delimited JSON on stdin/stdout and emits a
+typed event stream (`ready` with `protocolVersion` 1 and 2, `response`,
+`available_commands_update`, `extension_ui_request`, `advisor_cost_changed`).
+
+Confirmed working inbound commands:
+
+- `{"type":"prompt","message":"..."}` → `{"type":"response","success":true}`
+  (`text`, `content`, `input` and `prompt` as the payload key all fail with
+  `undefined is not an object (evaluating 'e.trimStart')`; the field is
+  `message`.)
+- `{"type":"set_model","provider":"sabi", ...}` → `Model not found:
+  sabi/undefined`, i.e. `provider` is read and the model field is not `model`.
+  The field name was not pinned before the probe was withdrawn.
+
+**This changes the spec 017 picture.** OMP is not only a proxy client: it
+exposes a programmatic control plane where a host can set the model and then
+run a turn. Sabi-as-selector therefore has a surface on OMP that does not
+depend on the extension API at all — no interception, no `setModel` action
+context, no session-scope limit. The extension probe's limits
+(`setModel` refused during load, no turn boundary, catalog unreadable) are
+limits of the *extension* surface specifically, not of OMP.
+
+OpenCode's plugin surface (`chat.message` → `/plan` → `/route` →
+`output.parts`) and OMP's RPC surface are genuinely different, which is what
+spec 017 says: per-harness capability, declared and consulted, never assumed.
