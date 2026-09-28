@@ -684,22 +684,43 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
     ensureRouteCompatible(body, config, decision)
     signal.throwIfAborted()
     stage = 'upstream'
-    // Transport failures (429 rate limit, 402 quota, 403 model/plan wall) on an adaptive
-    // round may retry on the next serving tier when the operator opts in with
-    // `transportFallback.enabled` (default off). Fixed aliases never fall back: an explicit
-    // choice that fails is served as-is. A fallback that also fails is consumed quietly and
-    // the planned tier's original error is served, so the client never sees a confusing mix.
+    // Transport failures on an adaptive round may retry on the next serving
+    // tier when the operator opts in with `transportFallback.enabled` (default
+    // off). Fixed aliases never fall back: an explicit choice that fails is
+    // served as-is. A fallback that also fails is consumed quietly and the
+    // planned tier's original error is served, so the client never sees a
+    // confusing mix.
+    //
+    // 401 belongs here and did not. A dead credential is the most recoverable
+    // fault there is — every OTHER provider's key is usually fine — and
+    // treating it as terminal meant one expired OpenRouter key stranded a
+    // machine that had six working tiers behind it.
     let upstreamResponse = (await callUpstream(config, decision, buildUpstreamBody(config, decision, body), signal)).response
     let fallbackTier: string | undefined
     if (!upstreamResponse.ok &&
-      (upstreamResponse.status === 429 || upstreamResponse.status === 402 || upstreamResponse.status === 403) &&
+      (upstreamResponse.status === 401 ||
+        upstreamResponse.status === 429 ||
+        upstreamResponse.status === 402 ||
+        upstreamResponse.status === 403) &&
       decision.mode === 'auto' && config.transportFallback?.enabled === true) {
       const required = decision.state.inputModalities ?? []
       // A 429 is a statement about the POOL, not the model. Passing it in
       // lets the chain leave the shared daily allowance instead of walking
       // through the fifteen other models that draw on the same exhausted one.
       const quotaRefusal = upstreamResponse.status === 429
-      for (const fallback of getFallbackChain(config, decision.tier, required, quotaRefusal)) {
+      // A 401 is a statement about the UPSTREAM, and a wider one: every tier
+      // behind the same credential is equally dead, so the chain must leave
+      // the provider rather than try its next model. Walking to another
+      // model on the same dead key is how a single expired secret becomes
+      // four identical failures.
+      const credentialFailure = upstreamResponse.status === 401
+      // Release the failed response before walking the chain. Leaving its body
+      // unread holds the connection open while the next attempt runs, and the
+      // retry then fails for a reason that has nothing to do with the retry.
+      await upstreamResponse.body?.cancel().catch(() => {})
+      const fallbackChain = getFallbackChain(config, decision.tier, required, quotaRefusal)
+        .filter((f) => !(credentialFailure && f.upstream === decision!.upstream))
+      for (const fallback of fallbackChain) {
         const attempt: RouteDecision = {
           ...decision,
           tier: fallback.tier,

@@ -133,3 +133,67 @@ test('the first upstream error is served as-is when the fallback is off', async 
   assert.equal(record.outcome, 'transport')
   assert.equal(record.fallback, undefined)
 })
+
+/* ---- a dead credential is the most recoverable fault there is ----
+   One expired OpenRouter key used to strand a machine that had six working
+   tiers behind it, because 401 was not in the fallback trigger list. */
+
+test('an expired credential falls back to a different provider', async () => {
+  const seen: string[] = []
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const liveUpstream = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}')
+      seen.push(String(body.model ?? ''))
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'x', model: body.model, choices: [{ message: { role: 'assistant', content: 'ok' } }] }))
+    })
+  })
+  await new Promise<void>((r) => liveUpstream.listen(0, '127.0.0.1', r))
+  const livePort = (liveUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-401-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        live: { baseURL: `http://127.0.0.1:${livePort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 1, output: 2 } },
+        rescue: { upstream: 'live', model: 'synthetic-rescue', cost: { input: 1, output: 2 } },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    assert.equal(response.status, 200, 'a dead credential must not strand the request')
+    const body = (await response.json()) as { model?: string }
+    assert.equal(body.model, 'synthetic-rescue', 'served from the provider whose credential is alive')
+    assert.ok(seen.includes('synthetic-rescue'))
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    liveUpstream.close()
+  }
+})
