@@ -203,3 +203,83 @@ test('an expired credential falls back to a different provider', async () => {
     liveUpstream.close()
   }
 })
+
+
+test('an overloaded provider mid-chain does not end the fallback', async () => {
+  // Regression. The chain used to break on any status that was not
+  // 429/402/403, so a 503 from one candidate served the ORIGINAL error and
+  // every route behind it went untried. With the free lane down, the first
+  // paid candidate is often overloaded, so this was the common path.
+  //
+  // The plan tier dies on 401. The next candidate is unavailable (503). The
+  // one after that works. That last one must serve.
+  const seen: string[] = []
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const overloadedUpstream = createServer((_req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'currently experiencing high demand' } }))
+  })
+  await new Promise<void>((r) => overloadedUpstream.listen(0, '127.0.0.1', r))
+  const overloadedPort = (overloadedUpstream.address() as { port: number }).port
+
+  const liveUpstream = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}')
+      seen.push(String(body.model ?? ''))
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'x', model: body.model, choices: [{ message: { role: 'assistant', content: 'ok' } }] }))
+    })
+  })
+  await new Promise<void>((r) => liveUpstream.listen(0, '127.0.0.1', r))
+  const livePort = (liveUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-503-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        busy: { baseURL: `http://127.0.0.1:${overloadedPort}/v1`, apiKey: false },
+        live: { baseURL: `http://127.0.0.1:${livePort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 0, output: 0 } },
+        rescue: { upstream: 'live', model: 'synthetic-rescue', cost: { input: 5, output: 5 } },
+        // Cheaper than the rescue, so the chain reaches it first. A different
+        // upstream from the dead one, so a credential failure may not skip it.
+        busy: { upstream: 'busy', model: 'synthetic-busy', cost: { input: 1, output: 1 } },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    assert.equal(response.status, 200, 'one overloaded provider must not strand the request')
+    assert.ok(seen.includes('synthetic-rescue'), 'the reachable provider behind the 503 must serve')
+    const rows = readLog(logFile)
+    assert.equal(rows.at(-1)?.servedModel, 'synthetic-rescue', 'the receipt records the model that actually answered')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    overloadedUpstream.close()
+    liveUpstream.close()
+  }
+})

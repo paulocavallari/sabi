@@ -753,7 +753,13 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
           break
         }
         await retry.body?.cancel().catch(() => {})
-        if (retry.status !== 429 && retry.status !== 402 && retry.status !== 403) break
+        // Keep walking. This used to break on anything that was not
+        // 429/402/403, so a single overloaded provider (503) ended the chain
+        // and the original error was served -- the routes behind it, which
+        // were perfectly reachable, never ran. The chain is a list of
+        // distinct routes; one of them being down is not evidence about the
+        // next. Same-upstream candidates are already excluded on a credential
+        // failure, so there is no dead key to re-walk here.
       }
     }
 
