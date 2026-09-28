@@ -1815,3 +1815,61 @@ zero failures; `npm run typecheck` clean; `npm run eval` exits 0 (8 tasks /
 Known gap: no production `ShadowMirror` is constructed from
 `.sabi/shadow.json` yet. The wiring point exists and is tested; the controller
 side is a follow-up.
+
+## [2026-09-27] review | specs/ consolidation: status fields, a false claim, a shape conflict
+
+Reviewed all 16 `specs/`, cross-checked against real source rather than
+titles or `tasks.md` (which turns out to be unreliable — see below). Full
+findings at `docs/research/specs-consolidation-review.md`.
+
+Corrected `Status: Planned` → `Built` in 001, 002, 005, 010's `spec.md`: each
+ships real code (`TrajectoryEvidence`/`VerificationState` for 001,
+`ExecutionReceipt`/`ExecutionCapabilities` for 002, the Trajectory IR +
+manifest + conformance suite for 005 Phases 1/3/4, the shadow mirror for 010
+Phases 1-2) that the Status field never reflected. Every `tasks.md` across all
+16 specs shows 0 checked boxes, including these four — `log.md`, not
+`tasks.md`, is the record of what shipped.
+
+Fixed a real in-repo contradiction: 002's Input line claimed 001 had "all 49
+tasks implemented"; 001's own `tasks.md` and Status field said otherwise. The
+underlying code claim was true; the tasks.md-completion claim was not.
+
+Reconciled a live shape conflict: `docs/prd.md` §9 and
+`specs/016-sabi-control-decision-interface/spec.md` both define a
+`SabiDecision`, differently. 016's closed union (`route | retry | escalate |
+stop`) is now explicitly authoritative in 016's own Relationship section; the
+PRD's flat shape is illustrative only.
+
+Not applied — left as recommendations: writing the undeclared 012↔016
+escalation seam, a new spec for user policy (PRD §27) and provider discovery
+(PRD §28, which 016 itself admits is unwritten), moving 011
+(huggingface-presence) out of `specs/` into `docs/`, and retiring or
+regenerating the now-stale `docs/roadmap-12-month.md`.
+
+## [2026-09-27] fix | Corrected the specs/ consolidation review: tasks.md was never unreliable
+
+Automated PR review (Codex, on #144) caught a real error in the review above:
+the claim that every `tasks.md` across all 16 specs showed 0 checked boxes
+was false, verified by direct recount rather than trusted — 001 is 49/49,
+002 is 3/16, 005 is 7/10, 010 is 10/10. That false premise had led the same
+pass to "correct" 002's true claim that 001 had all 49 tasks implemented into
+a false one; reverted. 002's Status is corrected to `Partial`, not `Built`:
+confirmed `createAdapterEmitter` (`packages/core/src/adapter-emitter.ts`)
+exists only in its own definition and unit test, no adapter production path
+calls it, so User Story 4 (every adapter emits the normalized receipt) is
+genuinely unshipped. Also flagged and left open: 016's closed decision union
+has no slot for the `unchanged` outcome its own fail-open requirement (R4)
+needs — that's 016's requirements text to fix, not this review's.
+## [2026-09-27] docs | Filed the Sabi PRD and an architecture-reconciliation note
+
+Two external documents filed as received: `docs/prd.md` (v1.0, the Router →
+Live → Control product vision) and
+`docs/research/prd-control-architecture-reconciliation.md` (maps the PRD onto
+the current proxy/controller/hook runtime — coding harness, session hook,
+controller daemon at :7433, Sabi proxy at :8787, Jev, providers, local state
+— and argues the gap to Control is smaller than the PRD alone suggests, since
+`specs/016-sabi-control-decision-interface/` covers most of the `decide()`
+surface it proposes). That spec lands via a companion PR (#144), not this one
+— at this commit `specs/012/013/016` are not yet on `main` (flagged by
+automated PR review, corrected 2026-09-27). Decision logged in
+`docs/decisions.md` (2026-09-27). No code changed; docs only.

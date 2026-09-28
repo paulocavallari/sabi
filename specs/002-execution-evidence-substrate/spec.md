@@ -4,11 +4,25 @@
 
 **Created**: 2026-09-23
 
-**Status**: Planned
+**Status**: Partial — `ExecutionReceipt` / `ExecutionCapabilities` are
+implemented in `packages/core/src/receipts.ts`, `capabilities.ts` and
+`router.ts` (`tasks.md` 3/16 checked, matching this). User Story 4 / FR-005 /
+SC-003 (every supported adapter emits the normalized receipt) is **not**
+shipped: `createAdapterEmitter` (`packages/core/src/adapter-emitter.ts`)
+exists only in its own definition and unit test — grep confirms no
+Command Code, OpenCode, Hermes, Oh My Pi, Prime Agent, Orca or DSH production
+path calls it. Corrected 2026-09-27 after an earlier pass in this same review
+wrongly marked this `Built` on a tasks.md count that was itself wrong (see
+below) — flagged by automated PR review, verified directly, fixed rather than
+just reverted.
 
 **Input**: Simplicio-material synthesis (deterministic local execution evidence as
-first-class routing input) mapped against `001-evidence-aware-scheduler` (all 49 tasks
-implemented) and `docs/specs/adaptive-inference-scheduler-vnext.md`.
+first-class routing input) mapped against `001-evidence-aware-scheduler` and
+`docs/specs/adaptive-inference-scheduler-vnext.md` (all 49 tasks implemented —
+confirmed: 001's `tasks.md` is 49/49 checked, matching its 2026-09-27 Status
+correction). An earlier pass in this same review incorrectly called this claim
+false based on a bad grep that undercounted checked boxes across all four
+specs it touched; that correction was itself wrong and is reverted here.
 
 ## Context: what already exists
 

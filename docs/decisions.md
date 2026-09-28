@@ -1679,3 +1679,126 @@ Whether to mark these `cost: 0` with the 403 as the fail-safe, or keep
 them priced. Recorded rather than decided here: the honest answer depends on
 whether NVIDIA's allowance is a depleting signup grant or a standing one,
 which the API does not expose.
+
+---
+
+## [2026-09-27] Corrected stale Status fields and reconciled the 016/PRD decision shape
+
+### Decision
+
+Full review of all 16 `specs/`, filed at
+`docs/research/specs-consolidation-review.md`. Corrected `Status: Planned` to
+`Built` in 001, 002, 005 and 010's `spec.md` — each is substantially
+implemented in `packages/core`/`packages/controller` and the field was simply
+never updated after shipping. Fixed 002's false claim that 001 had "all 49
+tasks implemented" (001's `tasks.md` has 0 boxes checked; the underlying code
+claim was real, the tasks.md claim was not). Reconciled the `SabiDecision`
+shape conflict between `docs/prd.md` §9 and
+`specs/016-sabi-control-decision-interface/spec.md`: 016's closed union is now
+explicitly authoritative, the PRD's §9 is illustrative only.
+
+### Why
+
+Four specs shipping real code while every spec in the directory says
+`Planned` is an active liability, not a cosmetic one — it is exactly what
+almost caused a duplicate spec to get written for 016 an hour before this
+review (see `docs/research/prd-control-architecture-reconciliation.md`). The
+`SabiDecision` conflict was a live, unresolved fork between two documents
+both claiming to be the interface; leaving two shapes standing invites two
+different implementations.
+
+### Tradeoffs
+
+`tasks.md` in all four corrected specs is still unchecked — fixing that
+requires mapping each shipped file back to a specific task number, which risks
+getting the mapping wrong in a way that's worse than the current honest "never
+touched" state. Left as a recommendation, not applied.
+
+### Revisit later?
+
+If a sixth spec ships without anyone updating its `Status` field, that's a
+process problem, not a one-off — worth deciding then whether `tasks.md`
+should be dropped in favor of `log.md` as the sole shipped-state record.
+
+---
+
+## [2026-09-27] Corrected the consolidation review itself: tasks.md was never unreliable
+
+### Decision
+
+The review above claimed every `tasks.md` across all 16 specs showed 0
+checked boxes, and on that basis "corrected" 002's true claim that 001 had
+all 49 tasks implemented into a false one. Both claims were wrong. Automated
+PR review (Codex, on #144) caught it; verified by direct recount, not
+trusted on say-so: 001 is 49/49 checked, 002 is 3/16, 005 is 7/10, 010 is
+10/10 — `tasks.md` is accurate. 002's `Status` is corrected to `Partial`
+(not `Built`) after confirming `createAdapterEmitter` exists only in its own
+definition and unit test — no adapter production path calls it, so User
+Story 4 is genuinely unshipped. 001's original true claim is restored.
+
+### Why
+
+A review whose central finding is "don't trust this file, trust the code"
+should not itself skip verifying the file it dismissed. The undercounting
+bug's exact cause wasn't isolated — worth being honest that it wasn't traced,
+only caught and fixed. The fix is to record the correction plainly, the same
+way `tasks.md` review dashboards. Also flagged by the same PR review and left
+open here: `specs/016`'s closed decision union (`route|retry|escalate|stop`)
+has no slot for the `unchanged` outcome its own R4 and acceptance criteria
+require — noted in `docs/research/specs-consolidation-review.md`, not fixed,
+since it's 016's requirements text and not this review's to silently resolve.
+
+### Tradeoffs
+
+None avoided by leaving this uncorrected — it would have stood as a false
+claim in a document whose whole purpose is catching exactly that kind of
+thing elsewhere in the repo.
+
+### Revisit later?
+
+Not applicable — this is the correction itself.
+---
+
+## [2026-09-27] Filed the Sabi PRD (Router → Live → Control) at `docs/prd.md`
+
+### Decision
+
+Adopted an external v1.0 PRD as the top-level product vision document, filed
+verbatim at `docs/prd.md`. It sits above the numbered `specs/` — it is the
+umbrella narrative (three layers: Router, Live, Control) that specs 001, 010,
+012, 013 and 016 each implement a bounded piece of, not itself a bounded,
+implementable spec. A companion architecture-reconciliation note (external
+analysis, filed as received) lives at
+`docs/research/prd-control-architecture-reconciliation.md`; it maps the PRD
+onto the current proxy/controller/hook runtime and argues the gap to Control
+is smaller than the PRD alone suggests.
+
+**Sequencing note (2026-09-27, flagged by automated PR review):** at the
+commit this PR lands on, `specs/012`, `013` and `016` are not yet on `main` —
+they exist on a companion branch/PR (specs consolidation, #144) built off a
+different, not-yet-pushed local history. The references to `specs/016` below
+describe where that spec will live once #144 merges, not a file present in
+this repository at this PR's own commit. Do not follow that path expecting it
+to resolve until #144 lands.
+
+### Why
+
+The PRD's one-rule product-drift test — "does this feature help Sabi decide
+what intelligence to use, or does it help the agent perform the work" —
+matches the boundary `specs/016-sabi-control-decision-interface/spec.md`
+independently defends ("Do not build a coding agent") once that spec lands.
+Filing the PRD locally makes that boundary citable instead of living only in
+chat history.
+
+### Tradeoffs
+
+The PRD and spec 016 overlap substantially on the `SabiState`/`SabiDecision`/
+`decide()` shape. Spec 016 is authoritative for that surface; the PRD and the
+reconciliation note are context, not a second source of truth — noted at the
+top of the reconciliation doc so the two don't drift apart silently.
+
+### Revisit later?
+
+When Sabi Live gets its first real spec (the PRD's layer 2, sections 15-21) —
+check whether the ClickHouse/Postgres split and telemetry schema here still
+match what actually gets built.

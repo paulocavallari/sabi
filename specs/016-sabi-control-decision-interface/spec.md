@@ -20,6 +20,19 @@ and acts on the answer. It is the first thing to be missing: `packages/server`
 exposes only `/v1/chat/completions`, borrowed-auth passthrough, and `/v1/models`.
 There is no way for a host to ask for a decision.
 
+**Relationship to `docs/prd.md` (2026-09-27):** the PRD's §9 "Decision
+Contract" sketches a `SabiDecision` shape — `{provider, model, effort,
+reasonCodes, confidence, fallback, ttl}` — that overlaps this spec's `route |
+retry | escalate | stop` closed union without matching it field-for-field.
+Reconciled here rather than left to drift: **this spec's shape is
+authoritative.** The PRD is the umbrella product-vision document (52 sections
+spanning Router/Live/Control); this spec is the scoped, testable engineering
+spec with acceptance criteria and a plan for the one surface in question.
+`docs/prd.md` §9 should be read as illustrative of the *concept* (a decision
+carries provider/model/reason), not as the literal API — implement against
+this spec, not that section. If `docs/prd.md` is revised, update its §9 to
+point here instead of restating a competing shape.
+
 ## The boundary, stated once
 
 > **Sabi routes tasks, not providers. The harness keeps its loop; Sabi returns the
