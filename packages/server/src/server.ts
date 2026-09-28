@@ -690,7 +690,10 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
     saveDecision(decision)
     stage = 'route'
     // Jev may change the selected tier. It must not bypass the shared compatibility gate.
-    ensureRouteCompatible(body, config, decision)
+    // Dispatch, not planning: by the time a request reaches the server a
+    // route has been chosen, and a client max_tokens ceiling must not throw
+    // away a route that can serve a shorter answer.
+    ensureRouteCompatible(body, config, decision, { allowOutputClamp: true })
     signal.throwIfAborted()
     stage = 'upstream'
     // Transport failures on an adaptive round may retry on the next serving
@@ -740,7 +743,10 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
           upstreamModel: fallback.upstreamModel,
         }
         try {
-          ensureRouteCompatible(body, config, attempt)
+          // Same reasoning as the dispatch gate above, and the reason a
+          // large client ceiling could empty the whole chain and serve the
+          // original error with every working route untried behind it.
+          ensureRouteCompatible(body, config, attempt, { allowOutputClamp: true })
         } catch {
           continue
         }

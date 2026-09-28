@@ -183,7 +183,14 @@ test('a tier with no declared output ceiling cannot win an output-capacity promo
   const undeclaredOnly = config({ maxOutputTokens: 100 })
   delete undeclaredOnly.models.other
   undeclaredOnly.models.local = undeclared('synthetic-local')
-  rejected(body({ model: 'sabi-fixed', max_tokens: 300 }), undeclaredOnly, /output token limit exceeds maxOutputTokens/)
+  // With no tier that declares enough output, the alias keeps its tier and
+  // the request proceeds with a clamped ceiling. Refusing it here was
+  // correct-looking and wrong in practice: OMP allows 128k output on every
+  // turn, so this turned a recoverable upstream failure into a hard 401 for
+  // the client with working routes untried behind it. A shorter answer
+  // satisfies an upper bound.
+  assert.doesNotThrow(() => route(body({ model: 'sabi-fixed', max_tokens: 300 }), undeclaredOnly))
+  assert.equal(route(body({ model: 'sabi-fixed', max_tokens: 300 }), undeclaredOnly).tier, 'cheap')
 })
 
 test('fixed aliases promote only when the requested output exceeds the selected tier', () => {
@@ -268,7 +275,13 @@ test('output limit is finite, bounded, unambiguous and reserves catalog maximum 
   for (const value of [0, -1, 1.5, Infinity, NaN, '100', null]) {
     rejected(body({ max_tokens: value }), config(), /output token limit must be/)
   }
-  rejected(body({ max_tokens: 2001 }), config(), /exceeds maxOutputTokens/)
+  // A ceiling above what the route can produce is clamped, not refused.
+  // `max_tokens` is an upper bound: a client allowing 2001 tokens is
+  // satisfied by a shorter answer. Refusing it meant that on a round which
+  // had already failed upstream, every viable route was discarded as
+  // incompatible and the chain came back empty, turning a recoverable
+  // upstream error into a hard failure for the client.
+  assert.doesNotThrow(() => route(body({ max_tokens: 2001 }), config()))
   rejected(body({ max_completion_tokens: 100 }), config(), /one output token limit/)
   assert.doesNotThrow(() => route(body({ max_tokens: undefined, max_completion_tokens: 100 }), config()))
   const request = body({ max_tokens: undefined })

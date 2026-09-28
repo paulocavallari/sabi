@@ -276,7 +276,12 @@ export function route(body: ChatRequestBody, config: SabiConfig, context: RouteC
       state,
       recovery,
     }
-    ensureRouteCompatible(body, config, decision)
+    // No tier can produce the number the client ALLOWED. That is not grounds
+    // to refuse the request: `max_tokens` is a ceiling, the client never
+    // insisted on it, and a shorter answer satisfies it. Planning still
+    // PREFERS a tier that can serve the figure -- the promotion above does
+    // that -- so this only changes what happens when none can.
+    ensureRouteCompatible(body, config, decision, { allowOutputClamp: true })
     return decision
   }
   let { rule, tier, reason } = decideTier(state, config.policy)
@@ -336,6 +341,11 @@ export function route(body: ChatRequestBody, config: SabiConfig, context: RouteC
     recovery,
     cache,
   }
-  ensureRouteCompatible(body, config, decision)
+  // Same reasoning as the fixed-alias path: a capable tier is preferred
+  // during planning; an unreachable ceiling is clamped at dispatch instead of
+  // turned into a 400 the client cannot act on. OMP advertises 128k output
+  // and sends that on every turn, so refusing here is what made sabi-code
+  // fail while every fixed alias kept working.
+  ensureRouteCompatible(body, config, decision, { allowOutputClamp: true })
   return decision
 }

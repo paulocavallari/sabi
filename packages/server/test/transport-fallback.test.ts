@@ -283,3 +283,76 @@ test('an overloaded provider mid-chain does not end the fallback', async () => {
     liveUpstream.close()
   }
 })
+
+test('a large client max_tokens does not empty the fallback chain', async () => {
+  // Regression, and the reason OMP failed on sabi-code specifically.
+  //
+  // `max_tokens` is an UPPER BOUND. OMP advertises 128k output and sends that
+  // number on every turn. The gate treated the requested figure as a demand:
+  // any route whose ceiling was lower was excluded as "incompatible", so on a
+  // round that had already failed, every viable candidate was discarded, the
+  // chain came back empty, and Sabi served the original 401 with the working
+  // providers untried behind it.
+  //
+  // The request must now be served, and the route that answered must have had
+  // its ceiling clamped rather than refused.
+  const seen: { model: string; max: unknown }[] = []
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const liveUpstream = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}')
+      seen.push({ model: String(body.model ?? ''), max: body.max_tokens })
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'x', model: body.model, choices: [{ message: { role: 'assistant', content: 'ok' } }] }))
+    })
+  })
+  await new Promise<void>((r) => liveUpstream.listen(0, '127.0.0.1', r))
+  const livePort = (liveUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-ceiling-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        live: { baseURL: `http://127.0.0.1:${livePort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 0, output: 0 }, maxOutputTokens: 65536, contextWindow: 200000 },
+        rescue: { upstream: 'live', model: 'synthetic-rescue', cost: { input: 5, output: 5 }, maxOutputTokens: 4096, contextWindow: 200000 },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }], max_tokens: 131072 }),
+    })
+    const raw = await response.text()
+    assert.equal(response.status, 200, `a client ceiling must not strand the request -- got ${response.status}: ${raw.slice(0, 200)}`)
+    assert.ok(seen.length > 0, 'some route must have been called')
+    assert.equal(seen.at(-1)?.model, 'synthetic-rescue', 'the reachable provider must serve')
+    assert.equal(seen.at(-1)?.max, 4096, 'the ceiling is clamped to the route, not forwarded as an impossible request')
+    assert.equal(readLog(logFile).at(-1)?.servedModel, 'synthetic-rescue', 'the receipt records what answered')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    liveUpstream.close()
+  }
+})
