@@ -1607,6 +1607,428 @@ Nothing constructs a `ShadowMirror` from `.sabi/shadow.json` in production yet.
 The wiring point exists and is tested; the controller side is a follow-up. This
 is stated in the PR body rather than left for someone to discover.
 
+## 2026-09-25 — A free tier is not a free price (NVIDIA, Mistral, Gemini)
+
+### Context
+
+Three providers were wired as upstreams and tested against live keys on
+2026-09-25: NVIDIA NIM, Mistral, and native Gemini. The intent was to widen
+the free lane. What the testing produced was a distinction the catalogue
+model does not currently express.
+
+Mistral refuses a model outside the account's tier:
+
+```json
+{"message":"This model is not available in your subscription tier",
+ "type":"tier_not_allowed","code":"1910","raw_status_code":403}
+```
+
+`codestral-latest` and `mistral-code-latest` are inside the tier.
+`mistral-large-latest` is not. The account is on a restricted tier and the
+tier — not a price — decides what runs.
+
+NVIDIA returned `404 Not found for account` for 20 of 25 tested models and
+`410 Gone` for the rest. Three responded to real completions. No credits or
+usage endpoint is exposed, so the exhaustion boundary cannot be observed
+before it is hit.
+
+Neither provider publishes per-token pricing through a machine-readable
+feed. `determineFree` therefore returns `unknown` for every model on both,
+and Gemini, whose 33 catalogue entries are all priced non-zero, returns
+`paid` for all of them.
+
+### Decision
+
+**A free tier, a credit balance, and a zero price are three different
+facts, and only the third is provable from a catalogue.**
+
+| | OpenRouter `:free` | Mistral free tier | NVIDIA credits |
+|---|---|---|---|
+| Zero-priced | yes, unconditionally | no — tier-restricted | no — finite balance |
+| On exhaustion | stays free, throttles | model leaves the tier | 404 / 410, or a charge |
+| Provable from a catalogue | yes | no | no |
+
+A credit balance is zero until it is not. Treating that as `free: true` is
+the same category of error as treating a 200 that carries an error body as
+a successful round: a success that was never verified.
+
+The three providers are therefore recorded with `paidModelsAllowed: true`
+and at list price. That is the conservative reading and it has a real cost:
+**Sabi's free-only lane will not route to capacity the operator is not
+paying for**, which is the opposite of the product's intent.
+
+`openrouter.paidModelsAllowed: false` is unchanged and still enforced
+per-upstream. The free-only rule was never global and still is not.
+
+### Consequences
+
+- Only models verified by a real completion against the operator's own key
+  are listed. The unlisted NVIDIA catalogue entries are absent because they
+  return 404 or 410, not because they were overlooked.
+- The quota dimension is not optional. `quota_state` is the only honest
+  representation of a tier- or credit-bounded allowance, which is the
+  argument in spec 013 for keeping capability, availability, and user
+  eligibility separate.
+- A future free-lane entry for these providers needs a policy that admits
+  tier-bounded free capacity explicitly, and a demotion trigger on the
+  403/404 transition. Neither exists yet.
+
+### Open
+
+Whether to mark these `cost: 0` with the 403 as the fail-safe, or keep
+them priced. Recorded rather than decided here: the honest answer depends on
+whether NVIDIA's allowance is a depleting signup grant or a standing one,
+which the API does not expose.
+
+---
+
+## [2026-09-27] Corrected stale Status fields and reconciled the 016/PRD decision shape
+
+### Decision
+
+Full review of all 16 `specs/`, filed at
+`docs/research/specs-consolidation-review.md`. Corrected `Status: Planned` to
+`Built` in 001, 002, 005 and 010's `spec.md` — each is substantially
+implemented in `packages/core`/`packages/controller` and the field was simply
+never updated after shipping. Fixed 002's false claim that 001 had "all 49
+tasks implemented" (001's `tasks.md` has 0 boxes checked; the underlying code
+claim was real, the tasks.md claim was not). Reconciled the `SabiDecision`
+shape conflict between `docs/prd.md` §9 and
+`specs/016-sabi-control-decision-interface/spec.md`: 016's closed union is now
+explicitly authoritative, the PRD's §9 is illustrative only.
+
+### Why
+
+Four specs shipping real code while every spec in the directory says
+`Planned` is an active liability, not a cosmetic one — it is exactly what
+almost caused a duplicate spec to get written for 016 an hour before this
+review (see `docs/research/prd-control-architecture-reconciliation.md`). The
+`SabiDecision` conflict was a live, unresolved fork between two documents
+both claiming to be the interface; leaving two shapes standing invites two
+different implementations.
+
+### Tradeoffs
+
+`tasks.md` in all four corrected specs is still unchecked — fixing that
+requires mapping each shipped file back to a specific task number, which risks
+getting the mapping wrong in a way that's worse than the current honest "never
+touched" state. Left as a recommendation, not applied.
+
+### Revisit later?
+
+If a sixth spec ships without anyone updating its `Status` field, that's a
+process problem, not a one-off — worth deciding then whether `tasks.md`
+should be dropped in favor of `log.md` as the sole shipped-state record.
+
+---
+
+## [2026-09-27] Corrected the consolidation review itself: tasks.md was never unreliable
+
+### Decision
+
+The review above claimed every `tasks.md` across all 16 specs showed 0
+checked boxes, and on that basis "corrected" 002's true claim that 001 had
+all 49 tasks implemented into a false one. Both claims were wrong. Automated
+PR review (Codex, on #144) caught it; verified by direct recount, not
+trusted on say-so: 001 is 49/49 checked, 002 is 3/16, 005 is 7/10, 010 is
+10/10 — `tasks.md` is accurate. 002's `Status` is corrected to `Partial`
+(not `Built`) after confirming `createAdapterEmitter` exists only in its own
+definition and unit test — no adapter production path calls it, so User
+Story 4 is genuinely unshipped. 001's original true claim is restored.
+
+### Why
+
+A review whose central finding is "don't trust this file, trust the code"
+should not itself skip verifying the file it dismissed. The undercounting
+bug's exact cause wasn't isolated — worth being honest that it wasn't traced,
+only caught and fixed. The fix is to record the correction plainly, the same
+way `tasks.md` review dashboards. Also flagged by the same PR review and left
+open here: `specs/016`'s closed decision union (`route|retry|escalate|stop`)
+has no slot for the `unchanged` outcome its own R4 and acceptance criteria
+require — noted in `docs/research/specs-consolidation-review.md`, not fixed,
+since it's 016's requirements text and not this review's to silently resolve.
+
+### Tradeoffs
+
+None avoided by leaving this uncorrected — it would have stood as a false
+claim in a document whose whole purpose is catching exactly that kind of
+thing elsewhere in the repo.
+
+### Revisit later?
+
+Not applicable — this is the correction itself.
+---
+
+## [2026-09-27] Filed the Sabi PRD (Router → Live → Control) at `docs/prd.md`
+
+### Decision
+
+Adopted an external v1.0 PRD as the top-level product vision document, filed
+verbatim at `docs/prd.md`. It sits above the numbered `specs/` — it is the
+umbrella narrative (three layers: Router, Live, Control) that specs 001, 010,
+012, 013 and 016 each implement a bounded piece of, not itself a bounded,
+implementable spec. A companion architecture-reconciliation note (external
+analysis, filed as received) lives at
+`docs/research/prd-control-architecture-reconciliation.md`; it maps the PRD
+onto the current proxy/controller/hook runtime and argues the gap to Control
+is smaller than the PRD alone suggests.
+
+**Sequencing note (2026-09-27, flagged by automated PR review):** at the
+commit this PR lands on, `specs/012`, `013` and `016` are not yet on `main` —
+they exist on a companion branch/PR (specs consolidation, #144) built off a
+different, not-yet-pushed local history. The references to `specs/016` below
+describe where that spec will live once #144 merges, not a file present in
+this repository at this PR's own commit. Do not follow that path expecting it
+to resolve until #144 lands.
+
+### Why
+
+The PRD's one-rule product-drift test — "does this feature help Sabi decide
+what intelligence to use, or does it help the agent perform the work" —
+matches the boundary `specs/016-sabi-control-decision-interface/spec.md`
+independently defends ("Do not build a coding agent") once that spec lands.
+Filing the PRD locally makes that boundary citable instead of living only in
+chat history.
+
+### Tradeoffs
+
+The PRD and spec 016 overlap substantially on the `SabiState`/`SabiDecision`/
+`decide()` shape. Spec 016 is authoritative for that surface; the PRD and the
+reconciliation note are context, not a second source of truth — noted at the
+top of the reconciliation doc so the two don't drift apart silently.
+
+### Revisit later?
+
+When Sabi Live gets its first real spec (the PRD's layer 2, sections 15-21) —
+check whether the ClickHouse/Postgres split and telemetry schema here still
+match what actually gets built.
+
+## 2026-09-28 — The advertised model list is a product surface, not an inventory
+
+### Context
+
+Adding providers had produced eleven advertised aliases. A client that renders
+them all — OMP did exactly this — shows a picker with `sabi-code`,
+`sabi-cheap`, `sabi-mid`, `sabi-strong`, `sabi-local`, `sabi-gemini`,
+`sabi-nv-fast`, `sabi-nv-max`, `sabi-mistral`, `sabi-independent` and
+`sabi-stealth`. Hugo's objection: Sabi exists to remove the model-picking
+decision, and a list of eleven options hands that decision straight back. It is
+a different list, not a shorter one.
+
+The routes are genuinely useful. Mistral is there because its key is one of the
+few that work; `sabi-independent` exists because space-bunny is funded outside
+the shared daily pool. Both are reasons to keep the route, and neither is a
+reason to show it to someone choosing.
+
+### Decision
+
+`ModelEntry.visibility` is `'default' | 'diagnostic'`, defaulting to
+`'default'`. `/v1/models` lists only default tiers plus the adaptive alias.
+Diagnostic tiers stay routable by name.
+
+**The advertised surface is four entries:** `sabi-code`, `sabi-cheap`,
+`sabi-mid`, `sabi-strong`. The last three are escape hatches for someone who
+wants to pin a tier deliberately; they are not a menu to browse.
+
+**Adding a provider MUST NOT add a row to that list.** New providers and new
+adapters default to `diagnostic` unless there is a specific reason a person
+should be choosing between them. The burden of proof runs toward invisibility,
+because the cost of a row is a decision handed back to the user and the cost of
+a hidden row is a name nobody needed.
+
+Omitting the field keeps existing installs unchanged, so this is a choice each
+install makes rather than a breaking change.
+
+### Why
+
+The failure this prevents is not a long list. It is Sabi quietly reverting into
+a model picker while still claiming to be a router — which is the exact drift
+the architecture audit found in the routing core, one layer out. A tier exists
+so the router can choose it. A tier in `/v1/models` exists so a person can
+choose it. Those are different instruments and conflating them costs the
+product the thing it is selling.
+
+### Scope
+
+Applies to `/v1/models` and anything rendering it. It does NOT remove routes,
+remove aliases, or change eligibility. `sabi-mistral` still works; it is simply
+not offered.
+
+### Known gap
+
+The diagnostic tiers are reachable but undiscoverable, which is correct for an
+operator and unhelpful for a first-time user who wonders why Mistral exists.
+The answer belongs in a status or explain surface, not in the model picker —
+and that surface does not exist yet.
+
+## 2026-09-28 — Borrowed credentials are honoured, opt-in; the host-execution gap is in the harness, not Sabi
+
+### Context
+
+Two things surfaced while making `sabi-code` work in OMP.
+
+First, `commandFor`/`createBorrowedProviderOverride` in
+`packages/adapters/oh-my-pi` promise that "OMP keeps its own credential and keeps
+sending it; Sabi forwards that credential to the provider it belongs to." **Sabi
+read that header and threw it away.** It dispatched with its configured key
+only, so a valid borrowed credential lost to an absent or expired one — and an
+expired configured key is exactly what made a working host credential look like
+a dead provider.
+
+Second, the goal of routing `sabi-code` to host-native capacity (space-bunny
+via OMP's entitlement) **has no implementation surface in OMP today.** The
+extension API exposes `registerProvider`, `registerProviders`, `registerCommand`,
+`registerTool`, `registerMessageRenderer` and `registerMessageCacheInvalidator`.
+There is no request/response interceptor, so an extension cannot observe Sabi's
+response and re-dispatch the round. `Sabi recommends, host applies` — the shape
+spec 016 describes — is not something OMP can currently be told.
+
+OMP's "openrouter" models are also not OpenRouter's API. They answer with no
+credential, with a garbage credential, and with `OPENROUTER_API_KEY` unset
+identically, and `openrouter.ai` never appears in an OMP log while
+`opencode.ai` does. There is therefore no shareable OpenRouter key in OMP to
+borrow; what OMP holds is a provider entitlement, which is not extractable and
+is not Sabi's to spend.
+
+### Decision
+
+1. **Honour a caller-supplied credential, opt-in, off by default.**
+   `borrowedCredentials` gates it. The default matters: without it a client on
+   loopback could choose which credential Sabi spends, or induce Sabi to present
+   a token to a provider it did not name. `proxy-contract.test.ts` guards that
+   boundary and still does. The caller's bearer wins when present; Sabi's
+   configured key is the fallback; the OMP placeholder literal
+   (`sabi-local-placeholder`) is never forwarded, because it authenticates
+   nothing and forwarding it would be forwarding a lie.
+
+2. **Record which credential a round used** (`caller` | `config`) so a borrowed
+   round is distinguishable from a configured one in evidence.
+
+3. **Do not fake host-native execution.** The `capacity` pools stay declared and
+   ranked, and dispatch still refuses them with `route to host: Sabi cannot dial
+   it`. That refusal is honest: Sabi has no way to make a host execute a
+   recommended round, and returning a completion from a route it cannot reach
+   would be a lie about what served.
+
+### Known gap, and what it needs
+
+`sabi-code` cannot reach OMP's space-bunny until **OMP gains a way to execute a
+round Sabi recommends.** That is a third-party change to oh-my-pi, not a Sabi
+defect. Sabi's side of the contract is the decision interface in spec 016; the
+harness side does not exist. Until it does, the reachable free capacity is
+whatever the caller lends: a harness that borrows a provider it holds a genuine
+key for gets that key used.
+
+### Scope
+
+Borrowed credentials do not change routing, cost accounting, or eligibility.
+They change only which token is presented on an upstream call.
+
+## 2026-09-28 — The two harness surfaces are different, and that decides the design
+
+### Context
+
+Pushing `sabi-code` to work in OMP surfaced a claim that had to be corrected
+twice, and the corrections matter more than the feature.
+
+Sabi was described as having no interception surface in OMP. Wrong: there are
+two sabi extension surfaces on this machine, and they belong to different
+harnesses.
+
+| surface | loaded by | interception | model-setting |
+|---|---|---|---|
+| `~/.local/state/sabi/hooks/opencode.mjs` | OpenCode, via `opencode.json` `plugin` | `chat.message`; `POST /plan` → `POST /route`; rewrites `output.parts` | via the same hook |
+| `~/.omp/agent/extensions/sabi.ts` | OMP, from its own extensions dir | none — OMP's API is `registerProvider(s)`, `registerCommand`, `registerTool`, `registerMessageRenderer`, `registerMessageCacheInvalidator` | `runtime.setModel`, `sendMessage`, `getServiceTiers`, `setThinkingLevel`, `transport` |
+
+Removing `provider.sabi` from `~/.config/opencode/opencode.json` did not stop OMP
+answering: OMP was loading its own extension, not OpenCode's config. One
+provider definition, two unrelated loaders, and the surfaces are not
+interchangeable.
+
+### Decision
+
+Sabi stops enumerating capacity it does not control. The host's catalog is the
+source of truth for what is reachable, the host dials when it can, and a host's
+ability to apply a recommendation is **declared per harness and consulted per
+session** — never assumed globally, because the two harnesses demonstrably
+differ.
+
+Recorded as spec 017, with a probe-first Phase 1: whether OMP can select per
+turn is unverified, and everything downstream depends on it.
+
+### Why
+
+The failure was never "Sabi had an expired key". It was that Sabi held a
+credential for a provider and maintained a hand-maintained catalog of eleven
+tiers for it, and both were wrong: the key was expired, and three of the tiers
+carried OpenRouter-style ids dispatched to NVIDIA's native API, all 404, none
+ever verified by a completion. Sabi was asserting knowledge of capacity it did
+not control, and asserting it confidently.
+
+### Known limitation, stated rather than designed around
+
+`runtime.setModel` is session-scoped and OMP has no pre-turn hook, so per-round
+adaptivity is not drivable from an extension. Until the probe says otherwise the
+OMP adapter declares `selectionScope: 'session'`, and Sabi must not claim finer
+granularity than the host can deliver. The receipt carries the granularity
+actually applied, so this is visible in evidence rather than in prose.
+
+## 2026-09-28 — OMP is session-scoped and cannot report its catalog (probed)
+
+Spec 017 Phase 1, measured against OMP 18.4.1 with a temporary extension.
+
+- **No turn boundary.** `registerMessageCacheInvalidator` and `registerProviders`
+  are `undefined` on the extension facade. The available surface is
+  `registerProvider`, `registerCommand`, `registerTool`, `registerMessageRenderer`.
+- **`runtime.setModel` exists but is an action method.** It throws
+  `Extension runtime not initialized. Action methods cannot be called during
+  extension loading`, and still throws when deferred 50ms into a run. It is
+  legal only from a user-initiated action.
+- **The catalog is unreadable from an extension.** `getModels`, `listModels`,
+  `availableModels`, `resolveModel`, `providers`, `getProviders`,
+  `listProviders` are all `undefined` on the facade and on `pi.runtime`.
+
+Consequences, recorded so they are not re-derived:
+
+1. The OMP adapter is **`selectionScope: 'session'`**, measured not assumed.
+2. OMP's natural fit is **operator-invoked**: a command that asks Sabi to choose
+   and then applies the choice, with OMP serving it under its own credential.
+   That is a genuine product. It is not per-round adaptivity, and Sabi must not
+   claim otherwise on this host.
+3. Spec 017's "the host's catalog is the source of truth" **does not hold on
+   OMP**. It degrades to choosing from a configured list. The rule stands for
+   hosts that can report a catalog; OMP is not one. Rule 1 is therefore a
+   property of capable hosts, not a universal promise.
+
+## 2026-09-28 — OMP's RPC mode is a complete host-control surface (probed)
+
+Found while probing what an OMP host can be asked to do, 2026-09-28, OMP 18.4.1.
+
+`omp --mode rpc` speaks newline-delimited JSON on stdin/stdout and emits a
+typed event stream (`ready` with `protocolVersion` 1 and 2, `response`,
+`available_commands_update`, `extension_ui_request`, `advisor_cost_changed`).
+
+Confirmed working inbound commands:
+
+- `{"type":"prompt","message":"..."}` → `{"type":"response","success":true}`
+  (`text`, `content`, `input` and `prompt` as the payload key all fail with
+  `undefined is not an object (evaluating 'e.trimStart')`; the field is
+  `message`.)
+- `{"type":"set_model","provider":"sabi", ...}` → `Model not found:
+  sabi/undefined`, i.e. `provider` is read and the model field is not `model`.
+  The field name was not pinned before the probe was withdrawn.
+
+**This changes the spec 017 picture.** OMP is not only a proxy client: it
+exposes a programmatic control plane where a host can set the model and then
+run a turn. Sabi-as-selector therefore has a surface on OMP that does not
+depend on the extension API at all — no interception, no `setModel` action
+context, no session-scope limit. The extension probe's limits
+(`setModel` refused during load, no turn boundary, catalog unreadable) are
+limits of the *extension* surface specifically, not of OMP.
+
+OpenCode's plugin surface (`chat.message` → `/plan` → `/route` →
+`output.parts`) and OMP's RPC surface are genuinely different, which is what
+spec 017 says: per-harness capability, declared and consulted, never assumed.
 ## 2026-09-28 — Effort scheduling, observe-only: percentage from round difficulty, bands from the tier's own ladder
 
 ### Context

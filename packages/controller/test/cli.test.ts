@@ -36,6 +36,23 @@ function run(args: string[], cwd: string, env: Record<string, string> = {}) {
       ...process.env,
       SABI_LOG: undefined,
       ORCA_CLI_COMMAND: '/nonexistent/sabi-test-orca-binary',
+      // State-dir isolation: controllerStateDir() falls back to
+      // $XDG_STATE_HOME/sabi, which is the developer's real directory.
+      // Without this, `status` and `doctor` read the developer's own daemon
+      // state, so the tests pass on a clean CI box and fail on every machine
+      // that has actually installed Sabi -- backwards, since the machines
+      // needing the coverage most are the ones where it cannot run. Same
+      // reasoning as the harness-config isolation below.
+      SABI_CONTROLLER_HOME: path.join(cwd, 'sabi-state'),
+        // Port isolation: the daemon binds the default 7433 unless told
+        // otherwise, and a developer machine running the real
+        // sabi-controller.service already holds it -- so a spawned daemon
+        // could never bind and `setup` failed with "did not become healthy
+        // in 5000ms". An isolated state directory is not enough: the state
+        // file and the socket are separate machine-global resources. A
+        // per-process port keeps these tests hermetic on a machine where Sabi
+        // is actually installed, which is where the coverage is needed.
+        SABI_CONTROLLER_PORT: String(7600 + (process.pid % 300)),
       // Harness-config isolation: an Orca terminal exports a real shared OpenCode
       // config dir and a CODEX_HOME, and the user's real ~/.claude exists, so a
       // spawned `sabi setup` could otherwise install hooks into live host configs.
@@ -62,6 +79,17 @@ function runAsync(args: string[], cwd: string, env: Record<string, string> = {})
         ...process.env,
         SABI_LOG: undefined,
         ORCA_CLI_COMMAND: '/nonexistent/sabi-test-orca-binary',
+        // State-dir isolation: same contract as run() — see the note there.
+        SABI_CONTROLLER_HOME: path.join(cwd, 'sabi-state'),
+        // Port isolation: controllerDaemonState reads
+        // SABI_CONTROLLER_PORT and otherwise binds the default 7433. A
+        // developer machine running the real sabi-controller.service already
+        // holds that port, so a spawned daemon failed to bind and `setup`
+        // exited 1 -- an isolated state directory was not enough, because the
+        // state and the socket are separate machine-global resources. A
+        // per-test port makes the daemon tests hermetic on a machine where
+        // Sabi is actually installed.
+        SABI_CONTROLLER_PORT: String(7600 + (process.pid % 300)),
         // Harness-config isolation: same contract as run() — a spawned CLI must
         // resolve every harness config inside the throwaway cwd.
         SABI_CLAUDE_SETTINGS: path.join(cwd, 'claude', 'settings.json'),
@@ -433,7 +461,7 @@ test('setup reports the detached fallback when the user service backend is disab
   const cwd = workspace()
   const stateDir = path.join(cwd, 'controller-state')
   const setup = run(['setup', '--json'], cwd, { SABI_CONTROLLER_HOME: stateDir, SABI_SERVICE_MODE: 'disabled' })
-  assert.equal(setup.status, 0)
+  assert.equal(setup.status, 0, `SETUP FAILED stdout=${setup.stdout} stderr=${setup.stderr}`)
   const record = JSON.parse(setup.stdout)
   assert.equal(record.daemon, 'running')
   assert.equal(record.service.installed, false)

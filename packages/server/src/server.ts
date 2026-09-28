@@ -35,10 +35,11 @@ import {
   type RouteDecision,
   type SabiConfig,
 } from '@sabi/core'
+import { renderDashboard } from './dashboard.ts'
 import { createSseTap, UpstreamStreamError, type SseTapResult } from './sse.ts'
 import { handlePassthrough, type PassthroughFormat } from './passthrough.ts'
 import { createTypesafeClient, type JudgeClient } from './typesafe.ts'
-import { buildUpstreamBody, callUpstream, chatResponseFromJson, isObject, readErrorText, readRequestBody, readResponseText, UpstreamProtocolError, usageFromJson } from './upstream.ts'
+import { borrowedCredential, buildUpstreamBody, callUpstream, chatResponseFromJson, isObject, readErrorText, readRequestBody, readResponseText, UpstreamProtocolError, usageFromJson } from './upstream.ts'
 
 const RECENT_LIMIT = 200
 
@@ -361,14 +362,23 @@ function modelSummary(config: SabiConfig) {
     return windows.length && windows.every((value): value is number =>
       typeof value === 'number' && Number.isFinite(value) && value > 0) ? Math.min(...windows) : undefined
   }
-  return Object.entries(config.aliases).map(([id, target]) => ({
-    id,
-    object: 'model',
-    created: 0,
-    owned_by: 'sabi',
-    context_window: contextWindowFor(target),
-    sabi: { target, model: target === 'auto' ? 'adaptive' : config.models[target]?.model },
-  }))
+  return Object.entries(config.aliases)
+    // The advertised list is the product surface, and it is deliberately
+    // small. A client that renders every alias turns Sabi back into a model
+    // picker, which is the thing Sabi was built to stop being. Diagnostic
+    // tiers stay routable by name for an operator who already knows them.
+    .filter(([, target]) => {
+      if (target === 'auto') return true
+      return config.models[target]?.visibility !== 'diagnostic'
+    })
+    .map(([id, target]) => ({
+      id,
+      object: 'model',
+      created: 0,
+      owned_by: 'sabi',
+      context_window: contextWindowFor(target),
+      sabi: { target, model: target === 'auto' ? 'adaptive' : config.models[target]?.model },
+    }))
 }
 
 export function createSabiServer(options: SabiServerOptions): SabiServer {
@@ -487,6 +497,12 @@ async function handleRequest(state: ServerState, req: IncomingMessage, res: Serv
     const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, RECENT_LIMIT)
     const decisions = state.recent.slice(-limit)
     sendJson(res, 200, { count: decisions.length, decisions })
+    return
+  }
+  if (req.method === 'GET' && path === '/dashboard') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.writeHead(200)
+    res.end(renderDashboard(state.recent))
     return
   }
   sendError(res, 404, `no route for ${req.method} ${path}`, 'not_found')
@@ -714,21 +730,65 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
     applyEffortSchedule(decision)
     stage = 'route'
     // Jev may change the selected tier. It must not bypass the shared compatibility gate.
-    ensureRouteCompatible(body, config, decision)
+    // Dispatch, not planning: by the time a request reaches the server a
+    // route has been chosen, and a client max_tokens ceiling must not throw
+    // away a route that can serve a shorter answer.
+    ensureRouteCompatible(body, config, decision, { allowOutputClamp: true })
     signal.throwIfAborted()
     stage = 'upstream'
-    // Transport failures (429 rate limit, 402 quota, 403 model/plan wall) on an adaptive
-    // round may retry on the next serving tier when the operator opts in with
-    // `transportFallback.enabled` (default off). Fixed aliases never fall back: an explicit
-    // choice that fails is served as-is. A fallback that also fails is consumed quietly and
-    // the planned tier's original error is served, so the client never sees a confusing mix.
-    let upstreamResponse = (await callUpstream(config, decision, buildUpstreamBody(config, decision, body), signal)).response
+    // Transport failures on an adaptive round may retry on the next serving
+    // tier when the operator opts in with `transportFallback.enabled` (default
+    // off). Fixed aliases never fall back: an explicit choice that fails is
+    // served as-is. A fallback that also fails is consumed quietly and the
+    // planned tier's original error is served, so the client never sees a
+    // confusing mix.
+    //
+    // 401 belongs here and did not. A dead credential is the most recoverable
+    // fault there is — every OTHER provider's key is usually fine — and
+    // treating it as terminal meant one expired OpenRouter key stranded a
+    // machine that had six working tiers behind it.
+    // A harness that routes one of its own providers through Sabi sends its
+    // own credential with the request. That token is honoured on every
+    // attempt, plan and fallback alike, so a working borrowed credential is
+    // not discarded in favour of an expired configured one.
+    // Opt-in, and off by default: without this a client could choose which
+    // credential Sabi spends, or talk it into presenting a token to a
+    // provider it did not intend.
+    const rawAuthorization = config.borrowedCredentials === true ? req.headers.authorization : undefined
+    const callerToken = borrowedCredential(Array.isArray(rawAuthorization) ? rawAuthorization[0] : rawAuthorization)
+    let upstreamResponse = (await callUpstream(config, decision, buildUpstreamBody(config, decision, body), signal, callerToken)).response
     let fallbackTier: string | undefined
+    // The error a client is shown must be the error that actually ended the
+    // round. When a fallback fails, `upstreamResponse` still holds the FIRST
+    // failure -- typically a dead credential on the planned tier -- so a
+    // transient upstream error on the last route in the chain surfaced as
+    // "401 API key expired" and sent the operator hunting a key that was never
+    // the problem. Keep the last real failure and serve that instead.
+    let lastFallbackFailure: { status: number; text: string; tier: string } | undefined
     if (!upstreamResponse.ok &&
-      (upstreamResponse.status === 429 || upstreamResponse.status === 402 || upstreamResponse.status === 403) &&
+      (upstreamResponse.status === 401 ||
+        upstreamResponse.status === 429 ||
+        upstreamResponse.status === 402 ||
+        upstreamResponse.status === 403) &&
       decision.mode === 'auto' && config.transportFallback?.enabled === true) {
       const required = decision.state.inputModalities ?? []
-      for (const fallback of getFallbackChain(config, decision.tier, required)) {
+      // A 429 is a statement about the POOL, not the model. Passing it in
+      // lets the chain leave the shared daily allowance instead of walking
+      // through the fifteen other models that draw on the same exhausted one.
+      const quotaRefusal = upstreamResponse.status === 429
+      // A 401 is a statement about the UPSTREAM, and a wider one: every tier
+      // behind the same credential is equally dead, so the chain must leave
+      // the provider rather than try its next model. Walking to another
+      // model on the same dead key is how a single expired secret becomes
+      // four identical failures.
+      const credentialFailure = upstreamResponse.status === 401
+      // Release the failed response before walking the chain. Leaving its body
+      // unread holds the connection open while the next attempt runs, and the
+      // retry then fails for a reason that has nothing to do with the retry.
+      await upstreamResponse.body?.cancel().catch(() => {})
+      const fallbackChain = getFallbackChain(config, decision.tier, required, quotaRefusal)
+        .filter((f) => !(credentialFailure && f.upstream === decision!.upstream))
+      for (const fallback of fallbackChain) {
         const attempt: RouteDecision = {
           ...decision,
           tier: fallback.tier,
@@ -739,11 +799,14 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
           upstreamModel: fallback.upstreamModel,
         }
         try {
-          ensureRouteCompatible(body, config, attempt)
+          // Same reasoning as the dispatch gate above, and the reason a
+          // large client ceiling could empty the whole chain and serve the
+          // original error with every working route untried behind it.
+          ensureRouteCompatible(body, config, attempt, { allowOutputClamp: true })
         } catch {
           continue
         }
-        const { response: retry } = await callUpstream(config, attempt, buildUpstreamBody(config, attempt, body), signal)
+        const { response: retry } = await callUpstream(config, attempt, buildUpstreamBody(config, attempt, body), signal, callerToken)
         if (retry.ok) {
           decision = attempt
           fallbackTier = attempt.tier
@@ -752,14 +815,22 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
           upstreamResponse = retry
           break
         }
-        await retry.body?.cancel().catch(() => {})
-        if (retry.status !== 429 && retry.status !== 402 && retry.status !== 403) break
+        lastFallbackFailure = { status: retry.status, text: await readErrorText(retry).catch(() => ''), tier: attempt.tier }
+        // Keep walking. This used to break on anything that was not
+        // 429/402/403, so a single overloaded provider (503) ended the chain
+        // and the original error was served -- the routes behind it, which
+        // were perfectly reachable, never ran. The chain is a list of
+        // distinct routes; one of them being down is not evidence about the
+        // next. Same-upstream candidates are already excluded on a credential
+        // failure, so there is no dead key to re-walk here.
       }
     }
 
     if (!upstreamResponse.ok) {
-      const text = await readErrorText(upstreamResponse)
-      const status = upstreamResponse.status
+      const text = lastFallbackFailure
+        ? (lastFallbackFailure.text || `upstream error ${lastFallbackFailure.status}`)
+        : await readErrorText(upstreamResponse)
+      const status = lastFallbackFailure?.status ?? upstreamResponse.status
       const headers: Record<string, string> = { 'content-type': upstreamResponse.headers.get('content-type') ?? 'application/json; charset=utf-8' }
       const retryAfter = upstreamResponse.headers.get('retry-after')
       if (retryAfter !== null) headers['retry-after'] = retryAfter

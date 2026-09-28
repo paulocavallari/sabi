@@ -63,14 +63,19 @@ function nestedObject(root: Record<string, unknown>, key: string): Record<string
   return objectValue(root[key])
 }
 
-/** Parse only the terminal-send receipt fields exposed at the command result root. */
+/** Parse the terminal-send receipt. The live orca-ide 1.4.209 shape nests the
+ * acceptance facts under `result.send.prompt.requestId` and `result.send.accepted`;
+ * the older flat root shape (`receipt.requestId`, `inputAccepted`) is still accepted.
+ * Anything that carries no known acceptance fact returns undefined, so a controller
+ * that cannot prove input acceptance reports `unverifiable` instead of a false positive. */
 export function parseTerminalSendReceipt(value: unknown): OrcaTerminalSendReceipt | undefined {
   const root = objectValue(value)
   if (!root) return undefined
-  const receipt = nestedObject(root, 'receipt') ?? root
-  const requestId = stringValue(receipt.requestId) ?? stringValue(receipt.request_id)
-  const inputAccepted = booleanValue(receipt.inputAccepted) ?? booleanValue(receipt.input_accepted) ?? booleanValue(receipt.accepted)
-  const turnStarted = booleanValue(receipt.turnStarted) ?? booleanValue(receipt.turn_started)
+  const send = nestedObject(root, 'send') ?? root
+  const prompt = nestedObject(send, 'prompt') ?? send
+  const requestId = stringValue(prompt.requestId) ?? stringValue(prompt.request_id) ?? stringValue(send.requestId) ?? stringValue(send.request_id) ?? stringValue((nestedObject(root, 'receipt') ?? {}).requestId)
+  const inputAccepted = booleanValue(send.accepted) ?? booleanValue(send.inputAccepted) ?? booleanValue(send.input_accepted) ?? booleanValue(prompt.accepted) ?? booleanValue(prompt.inputAccepted) ?? booleanValue(prompt.input_accepted)
+  const turnStarted = booleanValue(send.turnStarted) ?? booleanValue(send.turn_started) ?? booleanValue(prompt.turnStarted) ?? booleanValue(prompt.turn_started)
   if (requestId === undefined && inputAccepted === undefined && turnStarted === undefined) return undefined
   return {
     ...(requestId ? { requestId } : {}),

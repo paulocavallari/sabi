@@ -609,6 +609,34 @@ export function validateConfig(value: unknown, source = '<inline>'): SabiConfig 
     }
   }
 
+  // Validate the advertised-surface flag where models are checked.
+  for (const [tierName, entry] of Object.entries(config.models)) {
+    if (entry.visibility !== undefined && entry.visibility !== 'default' && entry.visibility !== 'diagnostic') {
+      throw new Error(`Sabi config ${source}: models.${tierName}.visibility must be 'default' or 'diagnostic'`)
+    }
+  }
+
+  const capacity = config.capacity
+  if (capacity !== undefined) {
+    if (typeof capacity !== 'object' || capacity === null || Array.isArray(capacity)) {
+      throw new Error(`Sabi config ${source}: capacity must be an object mapping pool names to pools`)
+    }
+    for (const [poolName, pool] of Object.entries(capacity)) {
+      if (!pool || typeof pool !== 'object' || Array.isArray(pool)) {
+        throw new Error(`Sabi config ${source}: capacity.${poolName} must be an object`)
+      }
+      // Only 'host' is valid. Sabi cannot dial a subscription, and a config
+      // that implied otherwise would produce a route the dispatcher cannot
+      // execute -- silently, at request time.
+      if (pool.executor !== 'host') {
+        throw new Error(`Sabi config ${source}: capacity.${poolName}.executor must be 'host'`)
+      }
+      if (!pool.models || typeof pool.models !== 'object' || Array.isArray(pool.models) || !Object.keys(pool.models).length) {
+        throw new Error(`Sabi config ${source}: capacity.${poolName}.models must declare at least one model`)
+      }
+    }
+  }
+
   const harness = config.harness
   if (harness !== undefined) {
     if (typeof harness !== 'object' || harness === null) {

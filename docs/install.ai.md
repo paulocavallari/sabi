@@ -40,13 +40,14 @@ For Claude Code, Codex and controller-backed OpenCode workflows, install the pub
 controller first:
 
 ~~~bash
-npm install --global @vizuh/sabi-controller@0.1.0
+npm install --global @vizuh/sabi-controller@0.1.3
 sabi setup
 sabi doctor
 ~~~
 
-For Hermes or OpenCode inference through the local Sabi proxy, use a Sabi checkout because the
-controller package contains hooks and the daemon, not the proxy server or Hermes profile:
+For Hermes or OpenCode inference through the local Sabi proxy, use a Sabi checkout to generate the
+host profile. The controller package can run the proxy (`sabi serve`), but profile setup writes host
+configuration from the repository:
 
 ~~~bash
 git clone https://github.com/vizuh/sabi

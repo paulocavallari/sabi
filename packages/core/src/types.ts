@@ -340,6 +340,17 @@ export interface ContextAccounting {
 export interface ModelEntry {
   upstream: string
   model: string
+  /**
+   * Whether this tier belongs in the model list a client shows a person.
+   *
+   * Sabi exists to remove model-picking decisions. A picker carrying every
+   * diagnostic route does the opposite: it hands the decision back. So the
+   * advertised surface is deliberately small — the adaptive alias plus the
+   * cheap/mid/strong escape hatches — and everything else is `diagnostic`:
+   * still routable by name for an operator who knows it, invisible to anyone
+   * choosing. Adding a provider MUST NOT add a row here.
+   */
+  visibility?: 'default' | 'diagnostic'
   contextWindow?: number
   maxOutputTokens?: number
   capabilities?: ModelCapabilities
@@ -475,6 +486,25 @@ export interface ControllerConfig {
   harnessRouting?: ControllerHarnessRoutingConfig
 }
 
+/**
+ * A pool of capacity the host serves itself.
+ *
+ * `executor` is always 'host' for these. Sabi routes by recommending;
+ * it does not dial a subscription it was never handed a key for.
+ */
+export interface CapacityPool {
+  /** Free-text for the operator; never parsed. */
+  description?: string
+  executor: 'host'
+  models: Record<string, {
+    contextWindow?: number
+    maxOutputTokens?: number
+    capabilities?: { inputModalities?: ModelModality[] }
+    /** Proven zero on both sides, or the pool is not a free pool. */
+    cost?: { input: number; output: number }
+  }>
+}
+
 export interface SabiConfig {
   provenance?: string
   server?: { host?: string; port?: number }
@@ -493,9 +523,39 @@ export interface SabiConfig {
     contextWindow?: number
   }
   /**
+   * Capacity the host can serve but Sabi cannot reach with a credential.
+   *
+   * A host running Sabi may already hold capacity the router knows nothing
+   * about: a subscription, an orchestrator-injected model, an agent runtime
+   * with its own allowance. That pool is the one the operator has no key for
+   * and no bill to fear, so it is the first thing to consider when a provider
+   * credential dies — and until this existed, Sabi could not even see it.
+   *
+   * `executor: 'host'` is load-bearing. Sabi does NOT execute these. It
+   * recommends them and the host applies the decision, which is a different
+   * code path from dispatch. Declaring something Sabi could dial belongs in
+   * `upstreams`, not here.
+   */
+  capacity?: Record<string, CapacityPool>
+  /**
    * Opt-in retry of transport failures (429/402/403) on the next serving tier.
    * Omitted or false: the first upstream error is served as-is (current behavior).
    */
+  /**
+   * Honour a credential the caller sent with the request.
+   *
+   * A harness that points one of its own providers at Sabi keeps its own
+   * credential and keeps sending it. By default Sabi drops that header and
+   * dispatches with its configured key. That is the safer default and it is
+   * load-bearing: it means a client can never choose which credential Sabi
+   * spends, nor induce Sabi to present a token to a provider it did not
+   * intend. `proxy-contract.test.ts` guards exactly that boundary.
+   *
+   * Turning this on inverts it deliberately, and is correct only when every
+   * caller of this proxy is a harness you control. Hence opt-in rather than
+   * inferred from the presence of a header.
+   */
+  borrowedCredentials?: boolean
   transportFallback?: {
     enabled?: boolean
   }

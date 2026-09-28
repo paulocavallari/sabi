@@ -118,7 +118,25 @@ function positiveInteger(value: unknown): value is number {
  * omissions but never overrides an explicit negative capability or silently drops a field.
  * Native Command Code planRound() has its own host catalog and does not call this function.
  */
-export function ensureRouteCompatible(body: ChatRequestBody, config: SabiConfig, decision: RouteDecision): void {
+export interface RouteCompatibilityOptions {
+  /**
+   * Treat a requested output above the route's ceiling as a cap to clamp
+   * rather than a capability the route lacks.
+   *
+   * `max_tokens` is an UPPER BOUND. A client asking for 128k is content with
+   * 4k; it is not demanding 128k. Excluding a route because it cannot
+   * produce the whole number discards serviceable fallbacks, and on a round
+   * that has already failed once that can empty the chain and turn a
+   * recoverable upstream error into a hard failure for the client.
+   *
+   * Planning keeps this OFF so the router still prefers a tier that can honour
+   * the number when one exists. Dispatch and the fallback walk turn it ON,
+   * because by then there is nothing better to route to.
+   */
+  allowOutputClamp?: boolean
+}
+
+export function ensureRouteCompatible(body: ChatRequestBody, config: SabiConfig, decision: RouteDecision, options: RouteCompatibilityOptions = {}): void {
   const fail: (message: string) => never = (message) => {
     throw new SabiRouteError(`incompatible route '${decision.tier}': ${message}`)
   }
@@ -337,7 +355,12 @@ export function ensureRouteCompatible(body: ChatRequestBody, config: SabiConfig,
   if (strict && model.maxOutputTokens === undefined) fail('maxOutputTokens is unknown')
   if (strict && model.contextWindow === undefined) fail('contextWindow is unknown')
   const outputReserve = requestedOutput === undefined ? model.maxOutputTokens : requestedOutput as number
-  if (outputReserve !== undefined && model.maxOutputTokens !== undefined && outputReserve > model.maxOutputTokens) fail('output token limit exceeds maxOutputTokens')
+  if (outputReserve !== undefined && model.maxOutputTokens !== undefined && outputReserve > model.maxOutputTokens) {
+    // A ceiling the client allowed, not a length the client needs. Planning
+    // refuses so a capable tier is preferred; dispatch clamps so a working
+    // route is not thrown away over a number the client never insisted on.
+    if (!options.allowOutputClamp) fail('output token limit exceeds maxOutputTokens')
+  }
   if (reasoningTokens !== undefined && outputReserve !== undefined && reasoningTokens > outputReserve) fail('reasoning token budget exceeds the output reserve')
 
   const accounting = model.contextAccounting

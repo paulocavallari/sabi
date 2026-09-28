@@ -133,3 +133,285 @@ test('the first upstream error is served as-is when the fallback is off', async 
   assert.equal(record.outcome, 'transport')
   assert.equal(record.fallback, undefined)
 })
+
+/* ---- a dead credential is the most recoverable fault there is ----
+   One expired OpenRouter key used to strand a machine that had six working
+   tiers behind it, because 401 was not in the fallback trigger list. */
+
+test('an expired credential falls back to a different provider', async () => {
+  const seen: string[] = []
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const liveUpstream = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}')
+      seen.push(String(body.model ?? ''))
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'x', model: body.model, choices: [{ message: { role: 'assistant', content: 'ok' } }] }))
+    })
+  })
+  await new Promise<void>((r) => liveUpstream.listen(0, '127.0.0.1', r))
+  const livePort = (liveUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-401-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        live: { baseURL: `http://127.0.0.1:${livePort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 1, output: 2 } },
+        rescue: { upstream: 'live', model: 'synthetic-rescue', cost: { input: 1, output: 2 } },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    assert.equal(response.status, 200, 'a dead credential must not strand the request')
+    const body = (await response.json()) as { model?: string }
+    // Sabi rewrites `model` to the alias the caller asked for, so the
+    // identity of what actually served is asserted at the upstream and in
+    // the decision log, not on the response body.
+    assert.equal(body.model, 'sabi-code', 'the response is labelled with the requested alias')
+    assert.ok(seen.includes('synthetic-rescue'), 'the provider whose credential is alive served the round')
+    const rows = readLog(logFile)
+    assert.equal(rows.at(-1)?.servedModel, 'synthetic-rescue', 'the receipt records the model that actually answered')
+    assert.equal(rows.at(-1)?.fallback, 'rescue', 'the receipt records that a fallback happened')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    liveUpstream.close()
+  }
+})
+
+
+test('an overloaded provider mid-chain does not end the fallback', async () => {
+  // Regression. The chain used to break on any status that was not
+  // 429/402/403, so a 503 from one candidate served the ORIGINAL error and
+  // every route behind it went untried. With the free lane down, the first
+  // paid candidate is often overloaded, so this was the common path.
+  //
+  // The plan tier dies on 401. The next candidate is unavailable (503). The
+  // one after that works. That last one must serve.
+  const seen: string[] = []
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const overloadedUpstream = createServer((_req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'currently experiencing high demand' } }))
+  })
+  await new Promise<void>((r) => overloadedUpstream.listen(0, '127.0.0.1', r))
+  const overloadedPort = (overloadedUpstream.address() as { port: number }).port
+
+  const liveUpstream = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}')
+      seen.push(String(body.model ?? ''))
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'x', model: body.model, choices: [{ message: { role: 'assistant', content: 'ok' } }] }))
+    })
+  })
+  await new Promise<void>((r) => liveUpstream.listen(0, '127.0.0.1', r))
+  const livePort = (liveUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-503-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        busy: { baseURL: `http://127.0.0.1:${overloadedPort}/v1`, apiKey: false },
+        live: { baseURL: `http://127.0.0.1:${livePort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 0, output: 0 } },
+        rescue: { upstream: 'live', model: 'synthetic-rescue', cost: { input: 5, output: 5 } },
+        // Cheaper than the rescue, so the chain reaches it first. A different
+        // upstream from the dead one, so a credential failure may not skip it.
+        busy: { upstream: 'busy', model: 'synthetic-busy', cost: { input: 1, output: 1 } },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    assert.equal(response.status, 200, 'one overloaded provider must not strand the request')
+    assert.ok(seen.includes('synthetic-rescue'), 'the reachable provider behind the 503 must serve')
+    const rows = readLog(logFile)
+    assert.equal(rows.at(-1)?.servedModel, 'synthetic-rescue', 'the receipt records the model that actually answered')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    overloadedUpstream.close()
+    liveUpstream.close()
+  }
+})
+
+test('a large client max_tokens does not empty the fallback chain', async () => {
+  // Regression, and the reason OMP failed on sabi-code specifically.
+  //
+  // `max_tokens` is an UPPER BOUND. OMP advertises 128k output and sends that
+  // number on every turn. The gate treated the requested figure as a demand:
+  // any route whose ceiling was lower was excluded as "incompatible", so on a
+  // round that had already failed, every viable candidate was discarded, the
+  // chain came back empty, and Sabi served the original 401 with the working
+  // providers untried behind it.
+  //
+  // The request must now be served, and the route that answered must have had
+  // its ceiling clamped rather than refused.
+  const seen: { model: string; max: unknown }[] = []
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const liveUpstream = createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}')
+      seen.push({ model: String(body.model ?? ''), max: body.max_tokens })
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'x', model: body.model, choices: [{ message: { role: 'assistant', content: 'ok' } }] }))
+    })
+  })
+  await new Promise<void>((r) => liveUpstream.listen(0, '127.0.0.1', r))
+  const livePort = (liveUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-ceiling-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        live: { baseURL: `http://127.0.0.1:${livePort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 0, output: 0 }, maxOutputTokens: 65536, contextWindow: 200000 },
+        rescue: { upstream: 'live', model: 'synthetic-rescue', cost: { input: 5, output: 5 }, maxOutputTokens: 4096, contextWindow: 200000 },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }], max_tokens: 131072 }),
+    })
+    const raw = await response.text()
+    assert.equal(response.status, 200, `a client ceiling must not strand the request -- got ${response.status}: ${raw.slice(0, 200)}`)
+    assert.ok(seen.length > 0, 'some route must have been called')
+    assert.equal(seen.at(-1)?.model, 'synthetic-rescue', 'the reachable provider must serve')
+    assert.equal(seen.at(-1)?.max, 4096, 'the ceiling is clamped to the route, not forwarded as an impossible request')
+    assert.equal(readLog(logFile).at(-1)?.servedModel, 'synthetic-rescue', 'the receipt records what answered')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    liveUpstream.close()
+  }
+})
+
+test('when every fallback fails, the client sees the last failure, not the first', async () => {
+  // The failure this pins, observed 2026-09-28: the planned tier 401'd on an
+  // expired credential, the chain walked, and a route further down errored for
+  // an unrelated reason. Sabi served the ORIGINAL 401, so an operator reading
+  // "401 API key expired" went hunting a key that was never the problem --
+  // while the route that actually failed said something else entirely.
+  //
+  // The error a client is shown must be the error that ended the round.
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const brokenUpstream = createServer((_req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'upstream overloaded, try later' } }))
+  })
+  await new Promise<void>((r) => brokenUpstream.listen(0, '127.0.0.1', r))
+  const brokenPort = (brokenUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-surface-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        broken: { baseURL: `http://127.0.0.1:${brokenPort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 0, output: 0 }, maxOutputTokens: 4096, contextWindow: 100000 },
+        rescue: { upstream: 'broken', model: 'synthetic-rescue', cost: { input: 1, output: 1 }, maxOutputTokens: 4096, contextWindow: 100000 },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    const raw = await response.text()
+    assert.notEqual(response.status, 401, `the dead credential's status must not be what the client sees -- got ${raw.slice(0, 200)}`)
+    assert.match(raw, /overloaded/, 'the error surfaced is the one that actually ended the round')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    brokenUpstream.close()
+  }
+})

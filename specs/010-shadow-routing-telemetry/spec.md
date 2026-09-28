@@ -4,7 +4,12 @@
 
 **Created**: 2026-09-23
 
-**Status**: Planned
+**Status**: Built (Phases 1-2) — `packages/core/src/shadow.ts`,
+`shadow-store.ts` and `shadow-sink.ts` are implemented and wired into the
+server (PRs #136, #137). No production `ShadowMirror` is constructed from
+`.sabi/shadow.json` yet (the controller side is a follow-up — stated in
+`log.md`, not left implicit). `tasks.md` is 10/10 checked, matching. Verified
+2026-09-27 against the working tree.
 
 **Input**: Architecture synthesis — build instrumentation now, evaluation
 later (`sabi shadow on` in the LiteLLM traffic-mirroring spirit: actual

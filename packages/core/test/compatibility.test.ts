@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { buildEffectiveRequestEnvelope, ensureRouteCompatible, route, SabiRouteError } from '../src/index.ts'
+import { modelRouteCost } from '../src/compatibility.ts'
 import { validateConfig } from '../src/config.ts'
 import type { ChatRequestBody, ModelCapabilities, ModelEntry, SabiConfig } from '../src/types.ts'
 
@@ -183,7 +184,14 @@ test('a tier with no declared output ceiling cannot win an output-capacity promo
   const undeclaredOnly = config({ maxOutputTokens: 100 })
   delete undeclaredOnly.models.other
   undeclaredOnly.models.local = undeclared('synthetic-local')
-  rejected(body({ model: 'sabi-fixed', max_tokens: 300 }), undeclaredOnly, /output token limit exceeds maxOutputTokens/)
+  // With no tier that declares enough output, the alias keeps its tier and
+  // the request proceeds with a clamped ceiling. Refusing it here was
+  // correct-looking and wrong in practice: OMP allows 128k output on every
+  // turn, so this turned a recoverable upstream failure into a hard 401 for
+  // the client with working routes untried behind it. A shorter answer
+  // satisfies an upper bound.
+  assert.doesNotThrow(() => route(body({ model: 'sabi-fixed', max_tokens: 300 }), undeclaredOnly))
+  assert.equal(route(body({ model: 'sabi-fixed', max_tokens: 300 }), undeclaredOnly).tier, 'cheap')
 })
 
 test('fixed aliases promote only when the requested output exceeds the selected tier', () => {
@@ -268,7 +276,13 @@ test('output limit is finite, bounded, unambiguous and reserves catalog maximum 
   for (const value of [0, -1, 1.5, Infinity, NaN, '100', null]) {
     rejected(body({ max_tokens: value }), config(), /output token limit must be/)
   }
-  rejected(body({ max_tokens: 2001 }), config(), /exceeds maxOutputTokens/)
+  // A ceiling above what the route can produce is clamped, not refused.
+  // `max_tokens` is an upper bound: a client allowing 2001 tokens is
+  // satisfied by a shorter answer. Refusing it meant that on a round which
+  // had already failed upstream, every viable route was discarded as
+  // incompatible and the chain came back empty, turning a recoverable
+  // upstream error into a hard failure for the client.
+  assert.doesNotThrow(() => route(body({ max_tokens: 2001 }), config()))
   rejected(body({ max_completion_tokens: 100 }), config(), /one output token limit/)
   assert.doesNotThrow(() => route(body({ max_tokens: undefined, max_completion_tokens: 100 }), config()))
   const request = body({ max_tokens: undefined })
@@ -522,4 +536,28 @@ test('the unavailable-upstream fallback is cheapest-first, independent of declar
   assert.equal(routedB.tier, 'mid', 'same tier set in a different order resolves the same way')
   assert.equal(routedA.rule, 'availability')
   assert.equal(routedB.rule, 'availability')
+})
+
+test('an unknown price sorts after every known price, and is never read as free', () => {
+  // The nvidia tiers were declared cost 0 because they were assumed to be
+  // OpenRouter :free variants. They are metered on NVIDIA's native API, and
+  // the zero was a guess presented as a fact -- it made metered routes look
+  // free and handed them the cheap-first ordering against routes whose price
+  // is actually known.
+  //
+  // An omitted cost must read as UNKNOWN, not as zero: unknown must lose to
+  // every known price rather than tie with the free ones and win on ordering.
+  const withoutCost = (model: string): ModelEntry => {
+    const { cost: _cost, ...rest } = catalog({ model })
+    return rest
+  }
+  const unknown = modelRouteCost(withoutCost('synthetic-unknown'))
+  assert.equal(unknown, Number.POSITIVE_INFINITY, 'a missing price is unknown, not zero')
+
+  const free = modelRouteCost(catalog({ model: 'synthetic-free', cost: { input: 0, output: 0 } }))
+  const metered = modelRouteCost(catalog({ model: 'synthetic-metered', cost: { input: 1, output: 2 } }))
+  assert.equal(free, 0, 'a verified free route stays free')
+  assert.ok(metered > free, 'a known price beats free')
+  assert.ok(metered < unknown, 'a known price must beat an unknown one')
+  assert.ok(unknown > metered, 'unknown must sort last, never alongside free')
 })
