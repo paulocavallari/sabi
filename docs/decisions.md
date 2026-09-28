@@ -1860,3 +1860,66 @@ The diagnostic tiers are reachable but undiscoverable, which is correct for an
 operator and unhelpful for a first-time user who wonders why Mistral exists.
 The answer belongs in a status or explain surface, not in the model picker —
 and that surface does not exist yet.
+
+## 2026-09-28 — Borrowed credentials are honoured, opt-in; the host-execution gap is in the harness, not Sabi
+
+### Context
+
+Two things surfaced while making `sabi-code` work in OMP.
+
+First, `commandFor`/`createBorrowedProviderOverride` in
+`packages/adapters/oh-my-pi` promise that "OMP keeps its own credential and keeps
+sending it; Sabi forwards that credential to the provider it belongs to." **Sabi
+read that header and threw it away.** It dispatched with its configured key
+only, so a valid borrowed credential lost to an absent or expired one — and an
+expired configured key is exactly what made a working host credential look like
+a dead provider.
+
+Second, the goal of routing `sabi-code` to host-native capacity (space-bunny
+via OMP's entitlement) **has no implementation surface in OMP today.** The
+extension API exposes `registerProvider`, `registerProviders`, `registerCommand`,
+`registerTool`, `registerMessageRenderer` and `registerMessageCacheInvalidator`.
+There is no request/response interceptor, so an extension cannot observe Sabi's
+response and re-dispatch the round. `Sabi recommends, host applies` — the shape
+spec 016 describes — is not something OMP can currently be told.
+
+OMP's "openrouter" models are also not OpenRouter's API. They answer with no
+credential, with a garbage credential, and with `OPENROUTER_API_KEY` unset
+identically, and `openrouter.ai` never appears in an OMP log while
+`opencode.ai` does. There is therefore no shareable OpenRouter key in OMP to
+borrow; what OMP holds is a provider entitlement, which is not extractable and
+is not Sabi's to spend.
+
+### Decision
+
+1. **Honour a caller-supplied credential, opt-in, off by default.**
+   `borrowedCredentials` gates it. The default matters: without it a client on
+   loopback could choose which credential Sabi spends, or induce Sabi to present
+   a token to a provider it did not name. `proxy-contract.test.ts` guards that
+   boundary and still does. The caller's bearer wins when present; Sabi's
+   configured key is the fallback; the OMP placeholder literal
+   (`sabi-local-placeholder`) is never forwarded, because it authenticates
+   nothing and forwarding it would be forwarding a lie.
+
+2. **Record which credential a round used** (`caller` | `config`) so a borrowed
+   round is distinguishable from a configured one in evidence.
+
+3. **Do not fake host-native execution.** The `capacity` pools stay declared and
+   ranked, and dispatch still refuses them with `route to host: Sabi cannot dial
+   it`. That refusal is honest: Sabi has no way to make a host execute a
+   recommended round, and returning a completion from a route it cannot reach
+   would be a lie about what served.
+
+### Known gap, and what it needs
+
+`sabi-code` cannot reach OMP's space-bunny until **OMP gains a way to execute a
+round Sabi recommends.** That is a third-party change to oh-my-pi, not a Sabi
+defect. Sabi's side of the contract is the decision interface in spec 016; the
+harness side does not exist. Until it does, the reachable free capacity is
+whatever the caller lends: a harness that borrows a provider it holds a genuine
+key for gets that key used.
+
+### Scope
+
+Borrowed credentials do not change routing, cost accounting, or eligibility.
+They change only which token is presented on an upstream call.

@@ -37,7 +37,7 @@ import {
 import { createSseTap, UpstreamStreamError, type SseTapResult } from './sse.ts'
 import { handlePassthrough, type PassthroughFormat } from './passthrough.ts'
 import { createTypesafeClient, type JudgeClient } from './typesafe.ts'
-import { buildUpstreamBody, callUpstream, chatResponseFromJson, isObject, readErrorText, readRequestBody, readResponseText, UpstreamProtocolError, usageFromJson } from './upstream.ts'
+import { borrowedCredential, buildUpstreamBody, callUpstream, chatResponseFromJson, isObject, readErrorText, readRequestBody, readResponseText, UpstreamProtocolError, usageFromJson } from './upstream.ts'
 
 const RECENT_LIMIT = 200
 
@@ -707,7 +707,16 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
     // fault there is — every OTHER provider's key is usually fine — and
     // treating it as terminal meant one expired OpenRouter key stranded a
     // machine that had six working tiers behind it.
-    let upstreamResponse = (await callUpstream(config, decision, buildUpstreamBody(config, decision, body), signal)).response
+    // A harness that routes one of its own providers through Sabi sends its
+    // own credential with the request. That token is honoured on every
+    // attempt, plan and fallback alike, so a working borrowed credential is
+    // not discarded in favour of an expired configured one.
+    // Opt-in, and off by default: without this a client could choose which
+    // credential Sabi spends, or talk it into presenting a token to a
+    // provider it did not intend.
+    const rawAuthorization = config.borrowedCredentials === true ? req.headers.authorization : undefined
+    const callerToken = borrowedCredential(Array.isArray(rawAuthorization) ? rawAuthorization[0] : rawAuthorization)
+    let upstreamResponse = (await callUpstream(config, decision, buildUpstreamBody(config, decision, body), signal, callerToken)).response
     let fallbackTier: string | undefined
     if (!upstreamResponse.ok &&
       (upstreamResponse.status === 401 ||
@@ -750,7 +759,7 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
         } catch {
           continue
         }
-        const { response: retry } = await callUpstream(config, attempt, buildUpstreamBody(config, attempt, body), signal)
+        const { response: retry } = await callUpstream(config, attempt, buildUpstreamBody(config, attempt, body), signal, callerToken)
         if (retry.ok) {
           decision = attempt
           fallbackTier = attempt.tier

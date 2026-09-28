@@ -505,6 +505,21 @@ export interface SabiConfig {
    * Opt-in retry of transport failures (429/402/403) on the next serving tier.
    * Omitted or false: the first upstream error is served as-is (current behavior).
    */
+  /**
+   * Honour a credential the caller sent with the request.
+   *
+   * A harness that points one of its own providers at Sabi keeps its own
+   * credential and keeps sending it. By default Sabi drops that header and
+   * dispatches with its configured key. That is the safer default and it is
+   * load-bearing: it means a client can never choose which credential Sabi
+   * spends, nor induce Sabi to present a token to a provider it did not
+   * intend. `proxy-contract.test.ts` guards exactly that boundary.
+   *
+   * Turning this on inverts it deliberately, and is correct only when every
+   * caller of this proxy is a harness you control. Hence opt-in rather than
+   * inferred from the presence of a header.
+   */
+  borrowedCredentials?: boolean
   transportFallback?: {
     enabled?: boolean
   }

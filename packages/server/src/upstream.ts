@@ -9,15 +9,45 @@ export interface UpstreamCall {
   response: Response
   url: string
   body: Record<string, unknown>
+  /** Whether this call carried the caller's own credential or Sabi's configured one. */
+  credential: 'caller' | 'config'
 }
 
 export const buildUpstreamBody = buildEffectiveRequestEnvelope
+
+/**
+ * Tokens a harness registers with Sabi purely to satisfy a provider that
+ * insists on a bearer value. They authenticate nothing, so forwarding one
+ * upstream would be forwarding a lie.
+ */
+const PLACEHOLDER_TOKENS = new Set(['sabi-local-placeholder'])
+
+/**
+ * The credential a caller brought with the request, if it is usable.
+ *
+ * A harness that points one of its own providers at Sabi keeps its own
+ * credential and keeps sending it. That header used to be dropped on the
+ * floor, so a perfectly valid borrowed key was ignored in favour of Sabi's
+ * configured one -- which may be absent, wrong, or expired. An expired
+ * configured key is exactly what used to make a working borrowed credential
+ * look like a dead provider.
+ *
+ * Only a well-formed bearer value qualifies, and never a placeholder.
+ */
+export function borrowedCredential(authorization: string | undefined): string | undefined {
+  if (authorization === undefined) return undefined
+  const match = /^Bearer\s+(\S+)$/i.exec(authorization.trim())
+  if (!match) return undefined
+  const token = match[1]!
+  return PLACEHOLDER_TOKENS.has(token) ? undefined : token
+}
 
 export async function callUpstream(
   config: SabiConfig,
   decision: RouteDecision,
   body: Record<string, unknown>,
   signal: AbortSignal,
+  callerToken?: string,
 ): Promise<UpstreamCall> {
   const upstream = config.upstreams[decision.upstream]
   if (!upstream) throw new Error(`unknown upstream '${decision.upstream}'`)
@@ -31,8 +61,13 @@ export async function callUpstream(
   for (const name of Object.keys(headers)) {
     if (name.toLowerCase().startsWith('x-sabi-')) delete headers[name]
   }
-  const key = resolveKey(upstream.apiKey)
+  // The caller's credential wins when it has one: it is the credential the
+  // harness actually holds for this provider, whereas Sabi's configured key
+  // may be missing, wrong, or expired. Sabi's own key stays the fallback for
+  // callers that bring none.
+  const key = callerToken ?? resolveKey(upstream.apiKey)
   if (key) headers.authorization = `Bearer ${key}`
+  else delete headers.authorization
   const response = await fetch(url, {
     method: 'POST',
     redirect: 'error', // A redirect must not replay the inference or forward credentials.
@@ -40,7 +75,7 @@ export async function callUpstream(
     body: JSON.stringify(body),
     signal,
   })
-  return { response, url, body }
+  return { response, url, body, credential: callerToken ? 'caller' : 'config' }
 }
 
 export function isObject(value: unknown): value is Record<string, unknown> {
