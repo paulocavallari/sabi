@@ -189,8 +189,14 @@ test('an expired credential falls back to a different provider', async () => {
     })
     assert.equal(response.status, 200, 'a dead credential must not strand the request')
     const body = (await response.json()) as { model?: string }
-    assert.equal(body.model, 'synthetic-rescue', 'served from the provider whose credential is alive')
-    assert.ok(seen.includes('synthetic-rescue'))
+    // Sabi rewrites `model` to the alias the caller asked for, so the
+    // identity of what actually served is asserted at the upstream and in
+    // the decision log, not on the response body.
+    assert.equal(body.model, 'sabi-code', 'the response is labelled with the requested alias')
+    assert.ok(seen.includes('synthetic-rescue'), 'the provider whose credential is alive served the round')
+    const rows = readLog(logFile)
+    assert.equal(rows.at(-1)?.servedModel, 'synthetic-rescue', 'the receipt records the model that actually answered')
+    assert.equal(rows.at(-1)?.fallback, 'rescue', 'the receipt records that a fallback happened')
   } finally {
     await sabi.close()
     deadUpstream.close()
