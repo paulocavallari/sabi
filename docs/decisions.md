@@ -1972,3 +1972,30 @@ adaptivity is not drivable from an extension. Until the probe says otherwise the
 OMP adapter declares `selectionScope: 'session'`, and Sabi must not claim finer
 granularity than the host can deliver. The receipt carries the granularity
 actually applied, so this is visible in evidence rather than in prose.
+
+## 2026-09-28 — OMP is session-scoped and cannot report its catalog (probed)
+
+Spec 017 Phase 1, measured against OMP 18.4.1 with a temporary extension.
+
+- **No turn boundary.** `registerMessageCacheInvalidator` and `registerProviders`
+  are `undefined` on the extension facade. The available surface is
+  `registerProvider`, `registerCommand`, `registerTool`, `registerMessageRenderer`.
+- **`runtime.setModel` exists but is an action method.** It throws
+  `Extension runtime not initialized. Action methods cannot be called during
+  extension loading`, and still throws when deferred 50ms into a run. It is
+  legal only from a user-initiated action.
+- **The catalog is unreadable from an extension.** `getModels`, `listModels`,
+  `availableModels`, `resolveModel`, `providers`, `getProviders`,
+  `listProviders` are all `undefined` on the facade and on `pi.runtime`.
+
+Consequences, recorded so they are not re-derived:
+
+1. The OMP adapter is **`selectionScope: 'session'`**, measured not assumed.
+2. OMP's natural fit is **operator-invoked**: a command that asks Sabi to choose
+   and then applies the choice, with OMP serving it under its own credential.
+   That is a genuine product. It is not per-round adaptivity, and Sabi must not
+   claim otherwise on this host.
+3. Spec 017's "the host's catalog is the source of truth" **does not hold on
+   OMP**. It degrades to choosing from a configured list. The rule stands for
+   hosts that can report a catalog; OMP is not one. Rule 1 is therefore a
+   property of capable hosts, not a universal promise.

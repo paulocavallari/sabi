@@ -173,16 +173,50 @@ The receipt is the place this becomes visible, not the docs.
 5. Selection granularity is never reported as finer than the host's declared
    `selectionScope`.
 
-## Open questions
+## Phase 1 results (probed 2026-09-28, against OMP 18.4.1)
 
-- **T001 probe.** Does `registerMessageCacheInvalidator` fire at a turn
-  boundary, and is `runtime.setModel` safe mid-session? This decides whether
-  OMP gets per-turn or per-session selection, and it is the first thing to
-  build because everything downstream depends on it. Until answered, the OMP
-  adapter declares `selectionScope: 'session'`.
-- Does OMP's extension runtime expose the model catalog for reading? `getModels`
-  / `listModels` / `resolveModel` / `availableModels` exist in the OMP
-  distribution; whether they are reachable from an extension is unverified. If
-  they are not, the host cannot report its catalog and rule 1 degrades to "Sabi
-  chooses from a configured list", which is today's behaviour with better
-  hygiene.
+Answered by a temporary extension in `~/.omp/agent/extensions/`, since removed.
+Every answer below is observed, not inferred.
+
+**T001 — turn boundary: no.** The plugin facade exposes
+`registerProvider`, `registerCommand`, `registerTool`, `registerMessageRenderer`.
+`registerMessageCacheInvalidator` is `undefined`, and `registerProviders`
+(plural) is `undefined`. There is no turn-boundary signal on the extension
+surface.
+
+**T001 — `setModel`: exists, and is an action method.** `runtime.setModel` is a
+function, as are `sendMessage`, `sendUserMessage`, `setThinkingLevel`,
+`setServiceTier` and `getServiceTiers`. But calling it during extension loading
+throws `Extension runtime not initialized. Action methods cannot be called
+during extension loading`, and it still throws when deferred 50ms into the run.
+`runtime.transport` is `undefined`.
+
+So `setModel` is legal only in a user-initiated action context — a command, or
+an interactive turn — not from extension load and not from a timer.
+
+**T002 — catalog read: no.** `getModels`, `listModels`, `availableModels`,
+`resolveModel`, `providers`, `getProviders` and `listProviders` are all
+`undefined` on both the plugin facade and `pi.runtime`. An extension cannot
+enumerate what the host can serve. The names exist in the OMP distribution but
+are not reachable from the extension surface.
+
+### What this fixes
+
+- The OMP adapter declares **`selectionScope: 'session'`**, and that is now
+  measured rather than assumed.
+- OMP's natural shape is **operator-invoked**: a `registerCommand` — Sabi
+  chooses a model from policy, the command applies it, and the session serves it
+  with OMP's own credential. That is a real and useful product, and it is not
+  per-round adaptivity. Sabi must not advertise the latter here.
+- **Acceptance criterion 3 does not hold on OMP.** The host cannot report its
+  catalog, so rule 1 ("the host's catalog is the source of truth") degrades to
+  "Sabi chooses from a configured list" — today's behaviour, with better
+  hygiene. The criterion stands for hosts that can report; OMP is not one.
+
+### Still open
+
+- Whether OMP's extension surface has any **per-turn** signal in a
+  non-interactive context. `omp -p` runs entirely inside extension loading, so a
+  richer session context was not exercised and would need an interactive probe.
+- Whether OpenCode's plugin can report its catalog to Sabi, which is the
+  surface where rule 1 is most likely to hold.
