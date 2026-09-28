@@ -497,6 +497,98 @@ async function handleRequest(state: ServerState, req: IncomingMessage, res: Serv
     sendJson(res, 200, { count: decisions.length, decisions })
     return
   }
+  if (req.method === 'GET' && path === '/dashboard') {
+    const total = state.recent.reduce((acc, rec) => {
+      const u = rec.usage;
+      if (u) {
+        acc.prompt += u.promptTokens;
+        acc.completion += u.completionTokens;
+        acc.cached += u.cachedTokens;
+        acc.total += u.totalTokens;
+      }
+      return acc;
+    }, { prompt: 0, completion: 0, cached: 0, total: 0 });
+
+    const byModel = state.recent.reduce((map, rec) => {
+      const u = rec.usage;
+      if (!u) return map;
+      const model = rec.servedModel || rec.alias || 'unknown';
+      const existing = map.get(model) || { prompt: 0, completion: 0, total: 0 };
+      existing.prompt += u.promptTokens;
+      existing.completion += u.completionTokens;
+      existing.total += u.totalTokens;
+      map.set(model, existing);
+      return map;
+    }, new Map());
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Sabi Dashboard</title>
+        <style>
+          body { font-family: sans-serif; margin: 2rem; }
+          h1 { color: #2c3e50; }
+          .stats { display: flex; gap: 2rem; margin-top: 1rem; }
+          .stat { background: #f8f9fa; padding: 1rem; border-radius: 4px; min-width: 150px; }
+          .stat h2 { margin-top: 0; color: #3498db; }
+          .stat p { font-size: 1.5rem; margin: 0.5rem 0 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 2rem; }
+          th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
+          th { background-color: #f2f2f2; }
+        </style>
+      </head>
+      <body>
+        <h1>Sabi Token Usage Dashboard</h1>
+        <div class="stats">
+          <div class="stat">
+            <h2>Prompt Tokens</h2>
+            <p>${total.prompt.toLocaleString()}</p>
+          </div>
+          <div class="stat">
+            <h2>Completion Tokens</h2>
+            <p>${total.completion.toLocaleString()}</p>
+          </div>
+          <div class="stat">
+            <h2>Cached Tokens</h2>
+            <p>${total.cached.toLocaleString()}</p>
+          </div>
+          <div class="stat">
+            <h2>Total Tokens</h2>
+            <p>${total.total.toLocaleString()}</p>
+          </div>
+        </div>
+        <h2>Usage by Model</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Prompt</th>
+              <th>Completion</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Array.from(byModel.entries())
+              .map(([model, u]) => `
+                <tr>
+                  <td>${model}</td>
+                  <td>${u.prompt.toLocaleString()}</td>
+                  <td>${u.completion.toLocaleString()}</td>
+                  <td>${u.total.toLocaleString()}</td>
+                </tr>
+              `)
+              .join('')}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.writeHead(200);
+    res.end(html);
+    return
+  }
   sendError(res, 404, `no route for ${req.method} ${path}`, 'not_found')
 }
 
@@ -718,6 +810,13 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
     const callerToken = borrowedCredential(Array.isArray(rawAuthorization) ? rawAuthorization[0] : rawAuthorization)
     let upstreamResponse = (await callUpstream(config, decision, buildUpstreamBody(config, decision, body), signal, callerToken)).response
     let fallbackTier: string | undefined
+    // The error a client is shown must be the error that actually ended the
+    // round. When a fallback fails, `upstreamResponse` still holds the FIRST
+    // failure -- typically a dead credential on the planned tier -- so a
+    // transient upstream error on the last route in the chain surfaced as
+    // "401 API key expired" and sent the operator hunting a key that was never
+    // the problem. Keep the last real failure and serve that instead.
+    let lastFallbackFailure: { status: number; text: string; tier: string } | undefined
     if (!upstreamResponse.ok &&
       (upstreamResponse.status === 401 ||
         upstreamResponse.status === 429 ||
@@ -767,7 +866,7 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
           upstreamResponse = retry
           break
         }
-        await retry.body?.cancel().catch(() => {})
+        lastFallbackFailure = { status: retry.status, text: await readErrorText(retry).catch(() => ''), tier: attempt.tier }
         // Keep walking. This used to break on anything that was not
         // 429/402/403, so a single overloaded provider (503) ended the chain
         // and the original error was served -- the routes behind it, which
@@ -779,8 +878,10 @@ async function handleChat(state: ServerState, req: IncomingMessage, res: ServerR
     }
 
     if (!upstreamResponse.ok) {
-      const text = await readErrorText(upstreamResponse)
-      const status = upstreamResponse.status
+      const text = lastFallbackFailure
+        ? (lastFallbackFailure.text || `upstream error ${lastFallbackFailure.status}`)
+        : await readErrorText(upstreamResponse)
+      const status = lastFallbackFailure?.status ?? upstreamResponse.status
       const headers: Record<string, string> = { 'content-type': upstreamResponse.headers.get('content-type') ?? 'application/json; charset=utf-8' }
       const retryAfter = upstreamResponse.headers.get('retry-after')
       if (retryAfter !== null) headers['retry-after'] = retryAfter

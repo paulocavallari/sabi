@@ -356,3 +356,62 @@ test('a large client max_tokens does not empty the fallback chain', async () => 
     liveUpstream.close()
   }
 })
+
+test('when every fallback fails, the client sees the last failure, not the first', async () => {
+  // The failure this pins, observed 2026-09-28: the planned tier 401'd on an
+  // expired credential, the chain walked, and a route further down errored for
+  // an unrelated reason. Sabi served the ORIGINAL 401, so an operator reading
+  // "401 API key expired" went hunting a key that was never the problem --
+  // while the route that actually failed said something else entirely.
+  //
+  // The error a client is shown must be the error that ended the round.
+  const deadUpstream = createServer((_req, res) => {
+    res.writeHead(401, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'API key expired.', code: 401 } }))
+  })
+  await new Promise<void>((r) => deadUpstream.listen(0, '127.0.0.1', r))
+  const deadPort = (deadUpstream.address() as { port: number }).port
+
+  const brokenUpstream = createServer((_req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'upstream overloaded, try later' } }))
+  })
+  await new Promise<void>((r) => brokenUpstream.listen(0, '127.0.0.1', r))
+  const brokenPort = (brokenUpstream.address() as { port: number }).port
+
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sabi-surface-'))
+  const logFile = path.join(dir, 'decisions.jsonl')
+  const sabi = createSabiServer({
+    config: validateConfig({
+      upstreams: {
+        dead: { baseURL: `http://127.0.0.1:${deadPort}/v1`, apiKey: false },
+        broken: { baseURL: `http://127.0.0.1:${brokenPort}/v1`, apiKey: false },
+      },
+      models: {
+        cheap: { upstream: 'dead', model: 'synthetic-cheap', cost: { input: 0, output: 0 }, maxOutputTokens: 4096, contextWindow: 100000 },
+        rescue: { upstream: 'broken', model: 'synthetic-rescue', cost: { input: 1, output: 1 }, maxOutputTokens: 4096, contextWindow: 100000 },
+      },
+      aliases: { 'sabi-code': 'auto' },
+      policy: { exploration: 'cheap', unclassified: 'cheap' },
+      transportFallback: { enabled: true },
+      judge: { enabled: false },
+    }),
+    logFile,
+    verbose: false,
+  })
+  const port = await sabi.listen(0, '127.0.0.1')
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'sabi-code', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    const raw = await response.text()
+    assert.notEqual(response.status, 401, `the dead credential's status must not be what the client sees -- got ${raw.slice(0, 200)}`)
+    assert.match(raw, /overloaded/, 'the error surfaced is the one that actually ended the round')
+  } finally {
+    await sabi.close()
+    deadUpstream.close()
+    brokenUpstream.close()
+  }
+})
