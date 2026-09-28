@@ -1923,3 +1923,52 @@ key for gets that key used.
 
 Borrowed credentials do not change routing, cost accounting, or eligibility.
 They change only which token is presented on an upstream call.
+
+## 2026-09-28 — The two harness surfaces are different, and that decides the design
+
+### Context
+
+Pushing `sabi-code` to work in OMP surfaced a claim that had to be corrected
+twice, and the corrections matter more than the feature.
+
+Sabi was described as having no interception surface in OMP. Wrong: there are
+two sabi extension surfaces on this machine, and they belong to different
+harnesses.
+
+| surface | loaded by | interception | model-setting |
+|---|---|---|---|
+| `~/.local/state/sabi/hooks/opencode.mjs` | OpenCode, via `opencode.json` `plugin` | `chat.message`; `POST /plan` → `POST /route`; rewrites `output.parts` | via the same hook |
+| `~/.omp/agent/extensions/sabi.ts` | OMP, from its own extensions dir | none — OMP's API is `registerProvider(s)`, `registerCommand`, `registerTool`, `registerMessageRenderer`, `registerMessageCacheInvalidator` | `runtime.setModel`, `sendMessage`, `getServiceTiers`, `setThinkingLevel`, `transport` |
+
+Removing `provider.sabi` from `~/.config/opencode/opencode.json` did not stop OMP
+answering: OMP was loading its own extension, not OpenCode's config. One
+provider definition, two unrelated loaders, and the surfaces are not
+interchangeable.
+
+### Decision
+
+Sabi stops enumerating capacity it does not control. The host's catalog is the
+source of truth for what is reachable, the host dials when it can, and a host's
+ability to apply a recommendation is **declared per harness and consulted per
+session** — never assumed globally, because the two harnesses demonstrably
+differ.
+
+Recorded as spec 017, with a probe-first Phase 1: whether OMP can select per
+turn is unverified, and everything downstream depends on it.
+
+### Why
+
+The failure was never "Sabi had an expired key". It was that Sabi held a
+credential for a provider and maintained a hand-maintained catalog of eleven
+tiers for it, and both were wrong: the key was expired, and three of the tiers
+carried OpenRouter-style ids dispatched to NVIDIA's native API, all 404, none
+ever verified by a completion. Sabi was asserting knowledge of capacity it did
+not control, and asserting it confidently.
+
+### Known limitation, stated rather than designed around
+
+`runtime.setModel` is session-scoped and OMP has no pre-turn hook, so per-round
+adaptivity is not drivable from an extension. Until the probe says otherwise the
+OMP adapter declares `selectionScope: 'session'`, and Sabi must not claim finer
+granularity than the host can deliver. The receipt carries the granularity
+actually applied, so this is visible in evidence rather than in prose.
